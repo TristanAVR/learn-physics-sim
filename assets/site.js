@@ -87,6 +87,13 @@
       ],
       ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
       throwOnError: false,
+      // Colour roles used across chapters: \now{..} is known at the start of a step, \nxt{..} is new
+      // (computed by the step). Always pair colour with words or labels; never rely on colour alone.
+      macros: {
+        // Hex colours without '#': inside a macro, '#3' would mean "parameter 3".
+        '\\now': '\\textcolor{3d7be0}{#1}',
+        '\\nxt': '\\textcolor{e07b14}{#1}',
+      },
     });
   }
 

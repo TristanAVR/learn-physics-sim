@@ -137,3 +137,14 @@ footer { margin: 4em auto 0; max-width: 780px; color: var(--muted); font: 13px s
   main { margin-left: 0; padding: 56px 16px 60px; }
   #toc ol { columns: 1; }
 }
+
+/* Colour roles shared with the \now and \nxt maths macros (site.js). */
+.now { color: #3d7be0; font-weight: 600; }
+.nxt { color: #e07b14; font-weight: 600; }
+.check { margin: 1.4em 0; padding: 10px 16px; border: 1px dashed var(--rule); border-radius: 6px; }
+.check > :first-child { margin-top: 0; }
+.check > :last-child { margin-bottom: 0; }
+.check h4::before { content: "Check yourself: "; color: var(--muted); }
+.compare td, .compare th { text-align: center; }
+.compare td:first-child, .compare th:first-child { text-align: left; }
+.deeper { border-left: 4px solid var(--rule); }
