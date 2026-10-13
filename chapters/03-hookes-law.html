@@ -30,7 +30,8 @@ almost every material behaves like a spring when you look closely enough.</p>
 <p>It also prepares the next chapter. <a href="04-time-integration.html">Time Integration</a> tests every method on a
 mass bouncing on a spring, and it is much easier to follow when the spring itself is already familiar. By the end of
 this one you will be able to measure a spring's stiffness, predict how far it stretches and how fast it bounces, work
-out the energy it stores, and combine springs.</p>
+out the energy it stores, and combine springs, and you will have used all of that on puzzles from bathroom scales to
+bungee jumps.</p>
 
 <div class="note">
 <p><b>A guess before you start.</b> You hang a 1 kg bag on a spring and it stretches 2 cm. How far does it stretch
@@ -258,6 +259,128 @@ opposite, $\mathbf{F}_b = -\mathbf{F}_a$, on $b$.</li>
 <p>Because the two forces are equal and opposite, a spring can only change the distance between its particles, never
 push the pair as a whole. <a href="05-springs-damping.html">Springs, Damping and Energy</a> builds soft bodies from many
 of these.</p>
+
+<h2>Puzzles</h2>
+
+<p>Each puzzle is a different everyday situation built on the ideas above. Work them on paper or with a calculator,
+type your answer, and check it. The hints open one at a time; the worked solution unlocks after your first attempt.
+Answers within 2 % count.</p>
+
+<div class="puzzle" id="luggage" data-answer="2452.5" data-tol="0.02" data-unit="N/m">
+<h4>the luggage scale</h4>
+<p>A hand-held luggage scale is a spring with a hook. Hanging a 10 kg test weight on it stretches the spring by
+4.0 cm. What is the spring's stiffness $k$?</p>
+<details class="hint"><summary>Hint 1</summary><p>When the weight hangs still, the spring force balances the
+weight: $k\,x = m\,g$.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>The weight is $10 \times 9.81$ N. The stretch must be in metres.</p></details>
+<div class="worked"><p>$k = m g / x = (10 \times 9.81) / 0.04 = 2452.5$ N/m.</p></div>
+</div>
+
+<div class="puzzle" id="luggage2" data-answer="15.5" data-tol="0.02" data-unit="kg">
+<h4>weighing your suitcase</h4>
+<p>With the same scale ($k = 2452.5$ N/m), your suitcase stretches the spring 6.2 cm. What is the suitcase's mass?</p>
+<details class="hint"><summary>Hint 1</summary><p>Find the force first, $F = k\,x$, then turn force into mass.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>A mass $m$ weighs $m g$, so $m = F / g$.</p></details>
+<div class="worked"><p>$F = 2452.5 \times 0.062 = 152.1$ N, so $m = 152.1 / 9.81 = 15.5$ kg. Or by proportion: 6.2 cm
+is 1.55 times 4.0 cm, so 1.55 times 10 kg.</p></div>
+</div>
+
+<div class="puzzle" id="mattress" data-answer="9.81" data-tol="0.02" data-unit="mm">
+<h4>the mattress</h4>
+<p>A pocket-spring mattress has 400 identical springs side by side, each with $k = 200$ N/m. An 80 kg person lies on
+it, spread evenly. How far does the mattress sink, in millimetres?</p>
+<details class="hint"><summary>Hint 1</summary><p>Side by side means parallel: the stiffnesses add.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>The whole mattress is one spring of $400 \times 200$ N/m carrying
+$80 \times 9.81$ N.</p></details>
+<div class="worked"><p>$k = 400 \times 200 = 80{,}000$ N/m; $x = 784.8 / 80{,}000 = 0.00981$ m $= 9.81$ mm. Each
+spring carries only 1/400 of the weight, about 2 N.</p></div>
+</div>
+
+<div class="puzzle" id="car" data-answer="1.02" data-tol="0.03" data-unit="Hz">
+<h4>the car's bounce</h4>
+<p>When an 80 kg driver gets into a car, the car sinks 1.5 cm on its springs. With the driver in, the car's sprung mass
+is 1,280 kg. Push the car down and let go: how many bounces per second does it make? (Bounces per second, the frequency,
+is $f = \omega / 2\pi$.)</p>
+<details class="hint"><summary>Hint 1</summary><p>The driver's weight and the sink give the stiffness of all four
+springs together: $k = m_\text{driver}\,g / x$.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>The bounce uses the mass that is moving, the whole 1,280 kg:
+$\omega = \sqrt{k / 1280}$.</p></details>
+<div class="worked"><p>$k = 80 \times 9.81 / 0.015 = 52{,}320$ N/m. $\omega = \sqrt{52{,}320 / 1280} = 6.39$ rad/s, so
+$f = 6.39 / 2\pi = 1.02$ Hz: about one bounce a second, which is what car makers aim for (faster feels harsh, slower
+makes passengers seasick).</p></div>
+</div>
+
+<div class="puzzle" id="bow" data-answer="66.3" data-tol="0.02" data-unit="m/s">
+<h4>the bow and arrow</h4>
+<p>Treat a bow as a spring. Drawing it back 0.5 m takes a force of 220 N at full draw. All the stored energy goes into
+a 25 g arrow. How fast does the arrow leave the bow?</p>
+<details class="hint"><summary>Hint 1</summary><p>Find $k$ from the full-draw force, then the stored energy
+$\tfrac12 k x^2$.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>The arrow's kinetic energy $\tfrac12 m v^2$ equals the stored energy.
+The mass must be in kilograms.</p></details>
+<div class="worked"><p>$k = 220 / 0.5 = 440$ N/m. $E = \tfrac12 \times 440 \times 0.5^2 = 55$ J. Then
+$v = \sqrt{2E/m} = \sqrt{110 / 0.025} = 66.3$ m/s, about 240 km/h, close to real hunting bows. (Equivalently,
+$E = \tfrac12 F x$: half the peak force times the draw, the triangle again.)</p></div>
+</div>
+
+<div class="puzzle" id="bungee" data-answer="98.66" data-tol="0.02" data-unit="N/m">
+<h4>the bungee jump</h4>
+<p>A 70 kg jumper steps off a bridge 40 m above a river on a 15 m bungee cord. The cord is a spring once it is
+stretched beyond 15 m, and slack before that. What stiffness should the cord have so that the jumper's lowest point is
+2 m above the water?</p>
+<details class="hint"><summary>Hint 1</summary><p>At the lowest point the jumper is momentarily still. Use energy: the
+gravitational energy lost over the whole drop has all gone into the cord.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>The drop is $40 - 2 = 38$ m, so gravity releases $m g \times 38$. The
+cord is stretched by $38 - 15 = 23$ m, so it holds $\tfrac12 k\,(23)^2$. Set them equal.</p></details>
+<div class="worked"><p>$70 \times 9.81 \times 38 = \tfrac12\,k\,(23)^2$, so
+$k = 2 \times 26{,}095 / 529 = 98.7$ N/m. Notice the cord must hold the jumper's whole fall energy, not just their
+weight: at the bottom it pulls with $98.7 \times 23 = 2{,}269$ N, more than three times the jumper's weight.</p></div>
+</div>
+
+<p>Now try your answer: type the stiffness into the bungee simulation below and press <b>jump</b>.</p>
+
+<div class="demo" data-src="03-hookes-law/bungee.js" data-height="460"
+     data-caption="Set the cord stiffness to your answer, then jump. The green line is the target."></div>
+
+<div class="puzzle" id="bungee-series" data-answer="6.867" data-tol="0.02" data-unit="m">
+<h4>two cords end to end</h4>
+<p>A shop only has short cords, each with $k = 200$ N/m, so the operator ties two of them end to end. Once the jumper
+has stopped bouncing and hangs still, how far is the combined cord stretched? (Same 70 kg jumper.)</p>
+<details class="hint"><summary>Hint 1</summary><p>End to end is series: compliances add.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>$1/k = 1/200 + 1/200$. Then hanging still means $k x = m g$.</p></details>
+<div class="worked"><p>$k = 100$ N/m, so $x = 70 \times 9.81 / 100 = 6.87$ m. Each cord stretches half of that, 3.43 m,
+while carrying the full 687 N.</p></div>
+</div>
+
+<div class="puzzle" id="clock" data-answer="1.003" data-tol="0.02" data-unit="s">
+<h4>the short pendulum</h4>
+<p>A pendulum clock with a 25 cm pendulum: how long does one full swing (there and back) take?</p>
+<details class="hint"><summary>Hint 1</summary><p>A pendulum is a spring with $k = mg/L$, so
+$\omega = \sqrt{g/L}$.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>$T = 2\pi/\omega$, with $L$ in metres.</p></details>
+<div class="worked"><p>$\omega = \sqrt{9.81/0.25} = 6.26$ rad/s, so $T = 2\pi / 6.26 = 1.003$ s. A quarter of the length
+gives half the period of the 1 m pendulum ($T \propto \sqrt{L}$).</p></div>
+</div>
+
+<div class="puzzle" id="game" data-answer="0.314" data-tol="0.02" data-unit="s">
+<h4>the springboard in a game</h4>
+<p>In a platform game, a 0.5 kg crate sits on a springboard with $k = 200$ N/m. The player jumps on it and the crate
+starts bouncing. How long is one bounce?</p>
+<details class="hint"><summary>Hint</summary><p>$T = 2\pi\sqrt{m/k}$.</p></details>
+<div class="worked"><p>$T = 2\pi\sqrt{0.5/200} = 2\pi \times 0.05 = 0.314$ s. In the next chapter you will see why this
+number also tells you how large your simulation's time step may be.</p></div>
+</div>
+
+<div class="check">
+<h4>what they had in common</h4>
+<p>Look back at the puzzles. Which ones used <i>balance of forces</i> ($kx = mg$), which used <i>energy</i>
+($\tfrac12 kx^2$), and which used the <i>bounce</i> ($\omega = \sqrt{k/m}$)? How did you decide which to use?</p>
+<details><summary>One way to see it</summary>
+<p>Something hanging still: balance of forces (scale, mattress, two cords). Something moving fastest or furthest:
+energy (bow, bungee lowest point). "How often" or "how long": the bounce (car, pendulum, crate). Recognising which kind
+of question you face is most of the work.</p>
+</details>
+</div>
 
 <h2>Your turn</h2>
 
