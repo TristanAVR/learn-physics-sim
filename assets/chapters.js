@@ -4,6 +4,7 @@ window.CHAPTERS = [
   { part: 'Getting started', id: '01-sandbox', title: 'The Sandbox' },
 
   { part: 'Foundations', id: '02-particles', title: 'Particles and Newton' },
+  { part: 'Foundations', id: '03-hookes-law', title: "Springs and Hooke's Law" },
   { part: 'Foundations', id: '04-time-integration', title: 'Time Integration' },
   { part: 'Foundations', id: '05-springs-damping', title: 'Springs, Damping and Energy' },
 

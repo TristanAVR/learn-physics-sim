@@ -22,10 +22,9 @@
 <h1>Springs, Damping and Energy</h1>
 <p class="subtitle">Tie particles together, make them wobble, and find out where the wobble goes.</p>
 
-<p>So far our particles have ignored each other. To build anything with a shape, a rope or a cushion or a block of
-jelly, particles must push and pull on their neighbours. The oldest and still the most useful way to do that is to
-join them with springs. A spring is easy to write, easy to reason about, and it is the local behaviour of nearly
-every elastic material, so what you learn here carries straight into cloth, rods and continuum mechanics.</p>
+<p><a href="03-hookes-law.html">Springs and Hooke's Law</a> gave you one spring and everything about it: the force,
+the energy, the bounce. Now we build with many. To make anything with a shape, a rope or a cushion or a block of jelly,
+we join particles with springs, and what you learn here carries straight into cloth, rods and continuum mechanics.</p>
 
 <p>Springs alone ring forever, so we add dampers. And springs bring back the stability limit from
 <a href="04-time-integration.html">Time Integration</a> in a new form: a network of springs is only as stable as its
@@ -35,8 +34,8 @@ soft body will explode before it does.</p>
 
 <h2>A spring between two particles</h2>
 
-<p>In the previous chapter the spring sat on a line and its force was $-k x$. In two (or three) dimensions a spring
-connects two particles $a$ and $b$ at positions $\mathbf{x}_a$ and $\mathbf{x}_b$. It has a <b>rest length</b> $L$,
+<p>In chapter 03 the spring sat on a line and its force was $-k x$, and its last section previewed the spring
+between two particles. Here it is in full. In two (or three) dimensions a spring connects two particles $a$ and $b$ at positions $\mathbf{x}_a$ and $\mathbf{x}_b$. It has a <b>rest length</b> $L$,
 the length at which it pulls on nothing, and a <b>stiffness</b> $k$ in newtons per metre. Let</p>
 
 $$\mathbf{d} = \mathbf{x}_b - \mathbf{x}_a, \qquad \ell = |\mathbf{d}|, \qquad \mathbf{n} = \frac{\mathbf{d}}{\ell}.$$

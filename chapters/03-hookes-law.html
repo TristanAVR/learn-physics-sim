@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Springs and Hooke's Law · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="03-hookes-law" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Springs and Hooke's Law</h1>
+<p class="subtitle">The one-line law behind ropes, cloth, jelly and every integrator test on this site.</p>
+
+<p>So far our particles feel gravity and drag, but nothing holds them together. To build anything with a shape, a
+rope or a cushion or a block of jelly, particles must push and pull on each other, and the simplest way to do that is
+a spring. This chapter is all physics and no numerical methods: what a spring does, what follows from it, and why
+almost every material behaves like a spring when you look closely enough.</p>
+
+<p>It also prepares the next chapter. <a href="04-time-integration.html">Time Integration</a> tests every method on a
+mass bouncing on a spring, and it is much easier to follow when the spring itself is already familiar. By the end of
+this one you will be able to measure a spring's stiffness, predict how far it stretches and how fast it bounces, work
+out the energy it stores, and combine springs.</p>
+
+<div class="note">
+<p><b>A guess before you start.</b> You hang a 1 kg bag on a spring and it stretches 2 cm. How far does it stretch
+with a 3 kg bag? Write your answer down.</p>
+</div>
+
+<h2>The notation</h2>
+
+<table>
+<tr><th>Symbol</th><th>Read it as</th><th>Units</th></tr>
+<tr><td>$x$</td><td>the <b>stretch</b>: how far the spring is from its rest length. Positive when it is longer, negative when it is squashed.</td><td>m</td></tr>
+<tr><td>$F$</td><td>the force the spring puts on whatever is attached to its end</td><td>N (newtons)</td></tr>
+<tr><td>$k$</td><td>the <b>stiffness</b> (or spring constant): newtons of force per metre of stretch</td><td>N/m</td></tr>
+<tr><td>$m$, $g$</td><td>a mass, and gravity's acceleration $9.81\ \text{m/s}^2$; a mass $m$ weighs $mg$ newtons</td><td>kg, m/s²</td></tr>
+</table>
+
+<p>The <b>rest length</b> is the length at which the spring pulls on nothing. The stretch $x$ is always measured from
+there, never from zero length.</p>
+
+<h2>Hooke's law</h2>
+
+<p>Robert Hooke stated it in 1678 as a Latin anagram, <i>ut tensio, sic vis</i>: "as the extension, so the force".
+Pull a spring twice as far and it pulls back twice as hard:</p>
+
+$$F = -\,k\,x.$$
+
+<p>Read it in two parts:</p>
+<ul>
+<li><b>The size</b>, $k\,|x|$: proportional to the stretch, with $k$ setting how much force each metre costs. A soft
+spring (small $k$) gives a lot of stretch for a little force; a stiff one barely moves.</li>
+<li><b>The sign</b>, the minus: the force always points back toward the rest length. Stretch it to the right
+($x &gt; 0$) and the force points left ($F &lt; 0$). Squash it ($x &lt; 0$) and it pushes right. This "always back
+toward the middle" is what makes springs oscillate.</li>
+</ul>
+
+<figure>
+<svg viewBox="0 0 720 230" role="img" aria-label="Three springs attached to a wall. At rest length: no force. Stretched to the right by x: the force points left. Squashed to the left: the force points right.">
+  <defs><marker id="ha" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d9473a"/></marker></defs>
+  <g fill="none" stroke="currentColor" stroke-width="2" opacity="0.6">
+    <polyline points="60,45 80,45 92,30 108,60 124,30 140,60 156,30 172,60 184,45 200,45"/>
+    <polyline points="60,115 80,115 96,100 116,130 136,100 156,130 176,100 196,130 212,115 260,115"/>
+    <polyline points="60,185 80,185 87,170 96,200 105,170 114,200 123,170 132,200 138,185 150,185"/>
+  </g>
+  <rect x="44" y="20" width="16" height="190" fill="currentColor" opacity="0.25"/>
+  <line x1="220" y1="18" x2="220" y2="215" stroke="currentColor" stroke-dasharray="4 4" opacity="0.5"/>
+  <text x="224" y="16" fill="currentColor" font-size="13" opacity="0.8">rest length</text>
+  <rect x="200" y="30" width="30" height="30" rx="3" fill="#2f6fdf"/>
+  <text x="250" y="51" fill="currentColor" font-size="15">x = 0: no force</text>
+  <rect x="260" y="100" width="30" height="30" rx="3" fill="#2f6fdf"/>
+  <line x1="258" y1="115" x2="215" y2="115" stroke="#d9473a" stroke-width="3" marker-end="url(#ha)"/>
+  <text x="305" y="121" fill="currentColor" font-size="15">stretched, x &gt; 0: force points left, F &lt; 0</text>
+  <rect x="150" y="170" width="30" height="30" rx="3" fill="#2f6fdf"/>
+  <line x1="182" y1="185" x2="225" y2="185" stroke="#d9473a" stroke-width="3" marker-end="url(#ha)"/>
+  <text x="250" y="191" fill="currentColor" font-size="15">squashed, x &lt; 0: force points right, F &gt; 0</text>
+</svg>
+<figcaption>The force (red) always points back toward the rest length (dashed). That is the minus sign in $F = -kx$.</figcaption>
+</figure>
+
+<h2>With numbers: measuring a spring</h2>
+
+<p>The easiest way to find $k$ is to hang a known weight on the spring and measure the stretch. When the weight hangs
+still, the spring's pull up exactly balances the weight down:</p>
+
+$$k\,x = m\,g \quad\Longrightarrow\quad k = \frac{m\,g}{x}, \qquad x = \frac{m\,g}{k}.$$
+
+<p>Hang 1 kg (weight $1 \times 9.81 = 9.81$ N) on a spring and it stretches 2 cm $= 0.02$ m. Then
+$k = 9.81 / 0.02 = 490.5$ N/m. Now a 3 kg bag: its weight is $29.43$ N, so it stretches
+$x = 29.43 / 490.5 = 0.06$ m, exactly <b>6 cm</b>. Three times the load, three times the stretch, because the law is a
+straight line. That answers the guess. (If you said something else, the idea to fix is exactly this proportionality:
+double the cause, double the effect.)</p>
+
+<div class="check">
+<h4>units</h4>
+<p>A spring has $k = 250$ N/m. You pull its end with 5 N. How far does it stretch, in centimetres?</p>
+<details><summary>Answer</summary>
+<p>$x = F/k = 5/250 = 0.02$ m $= 2$ cm. Always convert to metres before using $k$ in N/m.</p>
+</details>
+</div>
+
+<h2>The picture: a straight line</h2>
+
+<p>Plot the force against the stretch and Hooke's law is a straight line through the origin, sloping down. Its slope
+is $-k$: a steeper line is a stiffer spring.</p>
+
+<figure>
+<svg viewBox="0 0 720 300" role="img" aria-label="Graph of spring force F against stretch x: a straight line through the origin with slope minus k. At a stretch x the force is minus k x; the triangle between the line and the axis has area one half k x squared, the stored energy.">
+  <line x1="60" y1="150" x2="680" y2="150" stroke="currentColor" opacity="0.5"/>
+  <line x1="370" y1="15" x2="370" y2="285" stroke="currentColor" opacity="0.5"/>
+  <text x="675" y="170" text-anchor="end" fill="currentColor" font-size="14">stretch x</text>
+  <text x="378" y="28" fill="currentColor" font-size="14">force F</text>
+  <polygon points="370,150 570,150 570,250" fill="#e58a1f" opacity="0.3"/>
+  <line x1="170" y1="50" x2="610" y2="270" stroke="#d9473a" stroke-width="3"/>
+  <circle cx="570" cy="250" r="6" fill="#2f6fdf"/>
+  <line x1="570" y1="150" x2="570" y2="250" stroke="currentColor" stroke-dasharray="4 4" opacity="0.5"/>
+  <text x="580" y="245" fill="currentColor" font-size="14">F = &#8722;k x</text>
+  <text x="570" y="140" text-anchor="middle" fill="currentColor" font-size="14">x</text>
+  <text x="470" y="190" text-anchor="middle" fill="#c4701a" font-size="14">area = &#189; k x&#178;</text>
+  <text x="200" y="45" fill="#d9473a" font-size="14">slope = &#8722;k</text>
+</svg>
+<figcaption>Force against stretch. The orange triangle's area is the energy stored in the spring, explained next.</figcaption>
+</figure>
+
+<h2>Energy: why there is a half</h2>
+
+<p>Stretching a spring takes work, and the spring stores that work as <b>energy</b> you can get back. Work is force
+times distance, but the force is not constant while you stretch: it starts at zero and grows to $k\,x$ by the end. So
+the average force over the whole stretch is half the final force, and</p>
+
+$$E = \underbrace{\tfrac12\,k\,x}_{\text{average force}} \times \underbrace{x}_{\text{distance}} = \tfrac12\,k\,x^2 .$$
+
+<p>That is the area of the orange triangle: half of base $x$ times height $kx$. Two things follow:</p>
+<ul>
+<li>The energy depends on $x^2$: stretch twice as far and you store <b>four times</b> the energy. The 1 kg bag above
+stores $\tfrac12 \times 490.5 \times 0.02^2 = 0.098$ J; the 3 kg bag stores nine times that, $0.88$ J.</li>
+<li>The energy is the same whether you stretch or squash by the same amount ($x^2$ does not care about the sign).</li>
+</ul>
+
+<p>For the curious, the force is the downhill slope of the energy, $F = -\,dE/dx = -kx$. Every material model later on
+this site, up to the hyperelastic materials of the MPM chapters, is written this way round: energy first, force as its
+slope.</p>
+
+<h2>Combining springs</h2>
+
+<p>Sometimes it is easier to think about how much a spring <i>gives</i> per newton than how much it resists per
+metre. That is the <b>compliance</b>, $1/k$, in metres per newton, so that $x = (1/k)\,F$. A perfectly rigid connection
+has compliance 0, which is why the <a href="08-xpbd.html">XPBD</a> chapter is written entirely in compliances. The two
+views make combining springs easy:</p>
+
+<table class="compare">
+<tr><th></th><th>End to end (series)</th><th>Side by side (parallel)</th></tr>
+<tr><td>picture</td><td>one spring hanging from another</td><td>two springs sharing one load</td></tr>
+<tr><td>force in each spring</td><td>the whole load, $F$</td><td>shared: part each</td></tr>
+<tr><td>stretch of each spring</td><td>each stretches; the stretches add</td><td>the same, $x$, for both</td></tr>
+<tr><td>rule</td><td>compliances add: $\dfrac{1}{k} = \dfrac{1}{k_1} + \dfrac{1}{k_2}$</td><td>stiffnesses add: $k = k_1 + k_2$</td></tr>
+<tr><td>two 500 N/m springs</td><td>$1/k = 1/500 + 1/500$, so $k = 250$ N/m: softer</td><td>$k = 1000$ N/m: stiffer</td></tr>
+</table>
+
+<p>Why do compliances add in series? Each spring carries the full force $F$, so the first stretches $F/k_1$ and the
+second $F/k_2$, and the total stretch is $F\,(1/k_1 + 1/k_2)$. In parallel, both stretch the same $x$, so their forces
+$k_1 x$ and $k_2 x$ add to $(k_1 + k_2)\,x$.</p>
+
+<h2>A mass on a spring: the bounce</h2>
+
+<p>Hang a mass on the spring, pull it down a little, and let go. It bounces up and down around the point where it
+would hang still. How fast? Newton's second law, $a = F/m$, with Hooke's law for $F$ (measuring $x$ from the hanging
+point, so gravity is already balanced there):</p>
+
+$$a = -\frac{k}{m}\,x = -\,\omega^2\,x, \qquad \text{with } \omega = \sqrt{\frac{k}{m}} .$$
+
+<p>$\omega$ (omega) is the <b>angular frequency</b> in radians per second. It packs the two things that decide the
+bounce into one number: a stiffer spring or a lighter mass means a larger $\omega$ and a faster bounce. One full
+bounce, the <b>period</b>, takes</p>
+
+$$T = \frac{2\pi}{\omega} = 2\pi\sqrt{\frac{m}{k}} .$$
+
+<p>For the 1 kg bag on the 490.5 N/m spring: $\omega = \sqrt{490.5/1} = 22.1$ rad/s, so $T = 2\pi/22.1 = 0.28$ s,
+about three and a half bounces a second. The motion itself is a cosine. Released from rest a distance $A$ below the
+hanging point:</p>
+
+$$x(t) = A\cos(\omega t).$$
+
+<details class="deeper"><summary>Why a cosine? (two lines of calculus)</summary>
+<p>We need a function whose acceleration, its second derivative, is $-\omega^2$ times itself. Differentiate
+$x = A\cos(\omega t)$ once: $v = -A\omega\sin(\omega t)$. Again: $a = -A\omega^2\cos(\omega t) = -\omega^2 x$. It
+works, and it starts at $x = A$ with $v = 0$, as released. Without calculus: a cosine is what you see when you watch a
+point going round a circle at a steady speed from the side, and the spring's motion is exactly that circle seen edge
+on, which is the picture the next chapter draws in "phase space".</p>
+</details>
+
+<p>Two things are worth noticing. First, the period does <b>not</b> depend on how far you pull it: a big bounce and a
+small bounce take the same time, because a bigger stretch also means a bigger force. Second, energy sloshes back and
+forth: at the turning points the mass is still and all the energy is in the spring ($\tfrac12 kA^2$); in the middle the
+spring is unstretched and all of it is motion ($\tfrac12 m v^2$). The total never changes:</p>
+
+$$E = \tfrac12\,m\,v^2 + \tfrac12\,k\,x^2 = \tfrac12\,k\,A^2 .$$
+
+<p>This is the exact answer the next chapter compares every integrator against.</p>
+
+<div class="demo" data-src="03-hookes-law/solution.js" data-height="480"
+     data-caption="The blue mass moves by the formulas of this chapter. The grey ghost is an accurate numerical simulation. They agree."></div>
+
+<p>Try the demo: change the mass and the stiffness and watch the equilibrium line and the period readout. Quadruple the
+mass and the period doubles ($T \propto \sqrt{m}$). Change the pull and the period stays put.</p>
+
+<h2>Why almost everything is a spring</h2>
+
+<p>Hooke's law is not really a law of nature. Real springs, rubber bands and steel beams follow it only for small
+stretches. But it is the right approximation for almost anything that has a resting position, and that is why it is
+everywhere in simulation.</p>
+
+<p>Think of any force that pushes an object back toward some resting place: a pendulum, a ball in a bowl, two atoms in
+a crystal, a cell of jelly being squeezed. Plot that force against the displacement. It is some curve that passes
+through zero at the resting place. Zoom in close enough to that point, and every smooth curve looks like a straight
+line, with some slope we can call $-k$. So for small displacements, <b>every</b> such system is a spring.</p>
+
+<p>The pendulum is the classic example. A bob of mass $m$ on a string of length $L$, pushed sideways by a small
+distance $s$, feels a restoring force of about $m g\,s/L$ (gravity's pull, tilted by the string). That is Hooke's law
+with $k = mg/L$, so</p>
+
+$$\omega = \sqrt{\frac{k}{m}} = \sqrt{\frac{g}{L}}, \qquad T = 2\pi\sqrt{\frac{L}{g}} .$$
+
+<p>The mass cancels, which is why a grandfather clock keeps time whatever its bob weighs, and a 1 m pendulum swings with
+a period of $2\pi\sqrt{1/9.81} = 2.0$ s.</p>
+
+<div class="warning">
+<p><b>Where Hooke's law breaks.</b> Stretch far enough and real materials leave the straight line. Rubber gets stiffer
+as its long molecules straighten. Metal <i>yields</i>: it bends and stays bent (that is plasticity, met again in
+<a href="26-plasticity.html">Plasticity: Snow and Sand</a>). A coil spring squeezed until its coils touch becomes nearly
+rigid. A rope or a bungee cord pushes back on nothing when slack: it is a spring only when stretched.</p>
+</div>
+
+<h2>In two and three dimensions</h2>
+
+<p>In a simulation a spring joins two particles, $a$ and $b$, and can point in any direction. It is the same law,
+applied along the line between them:</p>
+
+<ol>
+<li><b>Current length.</b> $\mathbf{d} = \mathbf{x}_b - \mathbf{x}_a$, and its length $\ell = |\mathbf{d}|$.</li>
+<li><b>Stretch.</b> $\ell - L$, where $L$ is the rest length.</li>
+<li><b>Direction.</b> $\mathbf{n} = \mathbf{d}/\ell$, the unit vector from $a$ to $b$.</li>
+<li><b>Force.</b> $\mathbf{F}_a = k\,(\ell - L)\,\mathbf{n}$ on $a$ (toward $b$ when stretched), and the exact
+opposite, $\mathbf{F}_b = -\mathbf{F}_a$, on $b$.</li>
+</ol>
+
+<p>Because the two forces are equal and opposite, a spring can only change the distance between its particles, never
+push the pair as a whole. <a href="05-springs-damping.html">Springs, Damping and Energy</a> builds soft bodies from many
+of these.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>write Hooke's law and its consequences</h4>
+<p>Open the starter (<a href="../code/run.html?src=03-hookes-law/starter.js" target="_blank">run it</a>,
+<a href="../code/03-hookes-law/starter.js" target="_blank">read it</a>). The blue mass is drawn from four functions that
+are still empty: <code>springForce</code>, <code>equilibriumStretch</code>, <code>omega</code> and
+<code>stretchAt</code>. The grey ghost is an accurate simulation of the real spring. Fill in the four functions using
+this chapter's formulas until your mass moves exactly with the ghost (the readout "you vs ghost" stays near zero).</p>
+<p>Before running: with the defaults (k = 50 N/m, m = 1 kg), predict the equilibrium stretch in cm and the period in
+seconds.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>In the code, the stretch points <i>down</i> (the spring hangs), so a positive force pulls the mass down and the
+weight is $+mg$. Hooke's law is still $F = -kx$. The stretch at time $t$ is the equilibrium stretch plus
+<code>pullDown * Math.cos(omega() * t)</code>.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Compare with <a href="../code/03-hookes-law/solution.js" target="_blank">solution.js</a>:</p>
+<pre><code class="language-js">function springForce(x) { return -stiffness.value * x; }
+function equilibriumStretch() { return mass.value * g / stiffness.value; }
+function omega() { return Math.sqrt(stiffness.value / mass.value); }
+function stretchAt(t, pullDown) { return equilibriumStretch() + pullDown * Math.cos(omega() * t); }</code></pre>
+<p>With the defaults: $x = 9.81/50 = 19.6$ cm, $\omega = \sqrt{50} = 7.07$ rad/s, $T = 0.89$ s.</p>
+</details>
+
+<div class="exercise">
+<h4>break the period</h4>
+<p>The period does not depend on how far you pull. Check it in the demo by changing the pull. Then think: the
+grey ghost is a real simulation of a spring that obeys Hooke's law for every stretch. If the spring stopped obeying it
+for large stretches, getting stiffer, say, would a big bounce be faster or slower than a small one?</p>
+</div>
+
+<details class="hint"><summary>Answer</summary>
+<p>Faster. A spring that stiffens at large stretch pulls harder on the big bounces, so it brings the mass back sooner.
+Only the straight-line law makes the period independent of the amplitude.</p>
+</details>
+
+<h2>Summary</h2>
+<ul>
+<li><b>Hooke's law</b>, $F = -kx$: the force is proportional to the stretch from the rest length and points back
+toward it. $k$ is the stiffness in N/m.</li>
+<li>Hanging still: $kx = mg$. That is how you measure $k$, and how you predict a stretch.</li>
+<li>Stored energy: $E = \tfrac12 kx^2$, the triangle under the force line. Twice the stretch, four times the energy.</li>
+<li>Series springs add compliances ($1/k$); parallel springs add stiffnesses.</li>
+<li>A mass on a spring bounces at $\omega = \sqrt{k/m}$, period $T = 2\pi/\omega$, whatever the amplitude, as
+$x = A\cos\omega t$, with its energy constant.</li>
+<li>Near any resting position, almost every force is a spring; that is why springs are everywhere in simulation.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<ol>
+<li>What does the minus sign in $F = -kx$ mean, in words?</li>
+<li>Why is there a $\tfrac12$ in the spring's energy?</li>
+<li>Two identical springs: which is stiffer, end to end or side by side, and by how much?</li>
+<li>A 0.2 kg mass on a 80 N/m spring: what is its period?</li>
+<li>Why does a pendulum's period not depend on its mass?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

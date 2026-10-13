@@ -22,9 +22,10 @@
 <h1>Time Integration</h1>
 <p class="subtitle">Why simulations explode, and the three lines of code that decide whether yours will.</p>
 
-<p>In the last chapter you moved a particle by adding its velocity to its position every frame. It looked fine. In
-this chapter we hang that particle on a spring, and with exactly the same code it will fly off the screen within a
-few seconds. Nothing is wrong with the spring. The problem is the way we stepped through time, and fixing it is the
+<p>In <a href="02-particles.html">Particles and Newton</a> you moved a particle by adding its velocity to its
+position every frame, and in <a href="03-hookes-law.html">Springs and Hooke's Law</a> you met the spring and its exact
+bounce. In this chapter we put the two together: we hang that particle on a spring and step it with the same simple
+code, and it flies off the screen within a few seconds. Nothing is wrong with the spring. The problem is the way we stepped through time, and fixing it is the
 first real decision every simulation makes.</p>
 
 <p>By the end of this chapter you will know three ways to take a step, called <b>explicit</b>, <b>symplectic</b>
@@ -109,15 +110,15 @@ choice is a different integrator.</p>
 
 <h2>The test problem: a mass on a spring</h2>
 
-<p>A spring of stiffness $k$ (N/m) pulls a mass $m$ (kg) back toward its rest position. If it is stretched by $x$
-metres, the force is $F = -k\,x$ (Hooke's law; the minus sign means "back toward rest"). Newton's second law turns
-that into an acceleration:</p>
+<p>This is the spring from <a href="03-hookes-law.html">the previous chapter</a>; here is everything we need from it.
+A spring of stiffness $k$ (N/m) pulls a mass $m$ (kg) back toward its rest position with Hooke's law, $F = -k\,x$.
+Newton's second law turns that into an acceleration:</p>
 
 $$a = \frac{F}{m} = -\frac{k}{m}\,x = -\omega^2 x, \qquad \text{where } \omega = \sqrt{k/m}.$$
 
-<p>$\omega$ (omega) is the spring's <b>angular frequency</b> in radians per second. It just packs $k$ and $m$ into
-one number: a stiff spring or a light mass means a large $\omega$, a fast oscillation. We know the exact answer for
-this system: the mass swings forever as $x(t) = x_0\cos(\omega t)$, and its total energy never changes:</p>
+<p>$\omega$ (omega) is the spring's <b>angular frequency</b> in radians per second: a stiff spring or a light mass
+means a large $\omega$, a fast bounce. The exact answer is the cosine of the previous chapter, $x(t) = x_0\cos(\omega
+t)$, and the total energy never changes:</p>
 
 $$E = \underbrace{\tfrac12 m v^2}_{\text{kinetic}} + \underbrace{\tfrac12 k x^2}_{\text{stored in the spring}}.$$
 
