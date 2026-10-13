@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Particles and Newton · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="02-particles" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Particles and Newton</h1>
+<p class="subtitle">A dot, an arrow, and a rule for where they go next.</p>
+
+<p>Almost everything on this site is made of particles. A rope is a row of them, a sheet of cloth is a grid of them,
+and a block of jelly or a heap of snow is a cloud of thousands. Later chapters will tie particles together with
+springs and constraints, or let them talk through a grid, but underneath, every one of those simulations repeats the
+same small loop: work out the forces on each particle, then move it a little.</p>
+
+<p>This chapter builds that loop for one particle and then for many. You will throw a ball and compare it with the
+exact parabola from school physics, bounce it off the ground, spray a fountain of particles, and add air resistance
+until the falling speed stops growing. By the end you will be able to write a particle simulator from an empty file,
+predict what it should do before running it, and check that it does.</p>
+
+<h2>What a particle is</h2>
+
+<p>A <b>particle</b> is a point with a mass. It has no size, no shape and no orientation; it is somewhere, and it is
+moving. Two vectors capture that completely:</p>
+
+<ul>
+<li>the <b>position</b> $\mathbf{x} = (x, y)$, where it is, in metres;</li>
+<li>the <b>velocity</b> $\mathbf{v} = (v_x, v_y)$, how fast its position is changing, in metres per second.</li>
+</ul>
+
+<p>Together they form the particle's <b>state</b>. If you know the state now and the forces acting on it, you can
+work out the state a moment later, and that is all a simulation does. The mass $m$, in kilograms, is a fixed property
+rather than part of the state. Bold letters are vectors; plain letters are numbers.</p>
+
+<p>Throughout the site we use SI units: metres, kilograms and seconds, so forces come out in newtons
+($1\ \text{N} = 1\ \text{kg m/s}^2$). The $y$ axis points <i>up</i>, so gravity pulls toward negative $y$. Sticking to
+real units costs nothing and pays off constantly: when a number in your simulation looks wrong, you can compare it
+with the world. A ball that takes ten seconds to fall one metre is a bug you can see without a debugger.</p>
+
+<p>In code a particle is a plain object holding two vectors. The sandbox provides small helpers on <code>{x, y}</code>
+objects (<code>V.v</code>, <code>V.add</code>, <code>V.scale</code>, <code>V.addScaled(a, b, s)</code> for
+$a + s\,b$, <code>V.len</code>):</p>
+
+<pre><code class="language-js">const mass = 0.5;                      // kg
+const p = { x: V.v(0, 0), v: V.v(7.07, 7.07) };   // at the origin, moving up and to the right</code></pre>
+
+<h2>Newton's second law</h2>
+
+<p>Isaac Newton's second law connects forces to motion. The net force $\mathbf{F}$ on a particle equals its mass times
+its <b>acceleration</b> $\mathbf{a}$, the rate at which its velocity changes:</p>
+
+$$\mathbf{F} = m\,\mathbf{a}, \qquad \mathbf{a} = \frac{d\mathbf{v}}{dt}, \qquad \mathbf{v} = \frac{d\mathbf{x}}{dt}.$$
+
+<p>Read it as a chain. Forces set the acceleration ($\mathbf{a} = \mathbf{F}/m$); acceleration changes the velocity;
+velocity changes the position. A force does not move a particle directly. It bends its velocity, and the velocity
+moves it. That is why a thrown ball keeps rising for a while after gravity starts pulling it down.</p>
+
+<p>The first force we need is <b>gravity</b>. Near the Earth's surface every object is pulled down by its weight,</p>
+
+$$\mathbf{F}_\text{gravity} = m\,\mathbf{g}, \qquad \mathbf{g} = (0, -9.81)\ \text{m/s}^2.$$
+
+<p>Divide by $m$ and the acceleration is $\mathbf{g}$ whatever the mass: in a vacuum, a feather and a hammer fall
+together. Mass will start to matter as soon as a second force joins in, because other forces do not scale with $m$.</p>
+
+<h2>The update loop</h2>
+
+<p>The equations above describe continuous change. A computer advances in jumps, by a fixed <b>time step</b> $h$,
+often 1/60 s or smaller. The simplest way to jump is to pretend that velocity and acceleration stay constant for the
+whole step:</p>
+
+$$\mathbf{x}_{n+1} = \mathbf{x}_n + h\,\mathbf{v}_n, \qquad \mathbf{v}_{n+1} = \mathbf{v}_n + h\,\mathbf{a}_n,
+\qquad \mathbf{a}_n = \frac{\mathbf{F}(\mathbf{x}_n, \mathbf{v}_n)}{m}.$$
+
+<p>The subscript $n$ counts steps, so $\mathbf{x}_n$ is the position at time $t_n = n h$. In code:</p>
+
+<pre><code class="language-js">function integrate(p, h) {
+  const a = V.scale(force(p), 1 / mass);   // Newton: a = F / m
+  p.x = V.addScaled(p.x, p.v, h);          // position changes by velocity * time
+  p.v = V.addScaled(p.v, a, h);            // velocity changes by acceleration * time
+}</code></pre>
+
+<p>Call it once per step, forever, and you have a simulator. This scheme is called explicit Euler integration, and it
+is not the only choice: the order of those two lines, and which velocity you use to move, matters a great deal once
+springs appear. The next chapter, <a href="03-time-integration.html">Time Integration</a>, is entirely about that.
+For a ball in gravity it does well, and we can measure exactly how well, because for this problem we know the true
+answer.</p>
+
+<div class="demo" data-src="02-particles/solution.js" data-height="480"
+     data-caption="Pick a scene. The dashed grey curve is the exact drag-free parabola; the orange one is the exact curve with linear drag."></div>
+
+<h2>A projectile and its exact path</h2>
+
+<p>Throw a particle from the origin with speed $v_0$ at angle $\theta$ above the horizontal. With gravity as the only
+force, the horizontal velocity never changes and the vertical velocity decreases steadily, so the exact motion is</p>
+
+$$x(t) = v_0 \cos\theta\; t, \qquad y(t) = v_0 \sin\theta\; t - \tfrac12 g\,t^2,$$
+
+<p>a parabola. Setting $y = 0$ gives the flight time and the landing distance (the <b>range</b>):</p>
+
+$$T = \frac{2 v_0 \sin\theta}{g}, \qquad R = v_0\cos\theta\; T = \frac{v_0^2 \sin 2\theta}{g}.$$
+
+<p>With the demo's defaults, $v_0 = 10$ m/s and $\theta = 45°$, that is $T = 1.4416$ s and $R = 10.194$ m, and the top
+of the arc is $v_0^2\sin^2\theta / (2g) = 2.548$ m high. The demo draws this parabola as a dashed curve and lets the
+simulated particle fly over it, leaving a trail of dots. When it lands, it reports where.</p>
+
+<p>The simulated particle lands slightly <i>beyond</i> the exact point: about 1.4 cm at the default time step of 2 ms.
+Raise the time step to 16 ms and the gap grows to 12 cm; at 50 ms it is 35 cm. We can explain that exactly. Summing
+the update rule over $n$ steps gives the simulated height after $n$ steps:</p>
+
+$$y_n = v_0\sin\theta\; t_n - \tfrac12 g\,t_n^2 + \tfrac12 g\,h\,t_n .$$
+
+<p>The last term is the error. Because each step moves with the velocity from the <i>start</i> of the step, before
+gravity has slowed it, the particle always runs a little high, and it reaches the ground exactly one time step late.
+It therefore lands $v_0\cos\theta\; h$ too far: $7.07 \times 0.002 = 0.014$ m at 2 ms and
+$7.07 \times 0.05 = 0.35$ m at 50 ms, which is what the demo measures. The error shrinks in proportion to $h$; halve
+the step and you halve the error. Methods with this property are called <b>first order</b>.</p>
+
+<div class="note">
+<p><b>Always keep an exact answer next to your simulation.</b> A projectile, a falling body, a pendulum's period, a
+spring's frequency: whenever a closed-form solution exists, draw it or print it beside the simulated value. It turns
+"looks about right" into a number, and it is how every claim in this course is checked.</p>
+</div>
+
+<h2>Bouncing off the ground</h2>
+
+<p>The ground is the plane $y = 0$. A point particle that ends a step below it has passed through, so we do two
+things: put it back on the surface, and turn its downward velocity into an upward one. Real balls do not bounce back
+with all their speed; some energy goes into sound, heat and wobble. The <b>coefficient of restitution</b> $e$ is the
+fraction of the impact speed that survives:</p>
+
+$$v_y^{\text{after}} = -e\; v_y^{\text{before}}, \qquad 0 \le e \le 1.$$
+
+<pre><code class="language-js">function collideGround(p) {
+  if (p.x.y &lt; 0) {
+    p.x.y = 0;                                          // back onto the surface
+    if (p.v.y &lt; 0) p.v.y = -restitution.value * p.v.y;  // reflect, keeping the fraction e
+  }
+}</code></pre>
+
+<p>The check <code>p.v.y &lt; 0</code> matters: a particle that is below the ground but already moving up (because it
+bounced last step and has not yet climbed out) must not be reflected again, or it would be sent back down.</p>
+
+<p>What does $e$ do to the energy? Just before an impact all of the ball's energy is kinetic,
+$\tfrac12 m v^2$. Just after, the speed is $e v$, so the kinetic energy is $e^2$ times as large. Each bounce keeps a
+fraction $e^2$ of the energy and loses $1 - e^2$. Since the ball then climbs until that kinetic energy has all become
+potential energy $m g y$, each peak is $e^2$ times the previous one. Drop a ball from 2 m with $e = 0.8$ and the peaks
+should be 1.28 m, 0.819 m, 0.524 m, each one 64 % of the last, with 36 % of the energy lost per bounce.</p>
+
+<p>Choose "bouncing ball" in the demo. It marks each peak with a dashed line and prints the ratio of the last two.
+At the default 2 ms step the first peak is 1.291 m and the ratios come out at 0.646 to 0.657, within about 3 % of
+0.64. Now set the time step to 16 ms: the ratios rise to 0.70 and above, and with $e = 1$ the ball bounces higher
+every time. That is the same "running a little high" error as before, which adds a sliver of energy every step. You
+will see it again, much more dramatically, in the next chapter.</p>
+
+<div class="warning">
+<p><b>A ball that never stops.</b> With $e &lt; 1$ the bounces get shorter and shorter: the times between them shrink
+geometrically by a factor $e$, so infinitely many bounces fit in finite time (about 5.75 s for a 2 m drop at
+$e = 0.8$). A simulation with a fixed step cannot resolve them all, and the ball ends up jittering on the floor. Real
+engines add a rule such as "below a small impact speed, set the velocity to zero". Contact gets a proper treatment in
+<a href="15-contact-friction.html">Contact and Friction</a>.</p>
+</div>
+
+<h2>Many particles</h2>
+
+<p>Nothing in the update refers to other particles, so a hundred particles are a hundred independent copies of the
+same loop:</p>
+
+<pre><code class="language-js">for (const p of particles) {
+  integrate(p, h);
+  collideGround(p);
+}</code></pre>
+
+<p>The "fountain" scene emits about a hundred particles a second from the origin, with slightly random speeds and
+directions, and keeps the newest 400. Each follows its own parabola and bounces on its own. It already looks like
+spray from a hose. Once particles start pushing on each other (springs in chapter 04, constraints in chapter 05,
+pressure in a fluid much later), the loop gets one more stage, "compute forces between particles", but its shape
+stays the same.</p>
+
+<p>For a few hundred particles an array of objects is fine. For tens of thousands, as in the MPM chapters, you will
+store positions and velocities in flat typed arrays (<code>xs[i]</code>, <code>ys[i]</code>) so the memory is
+contiguous and fast to loop over. The physics does not change.</p>
+
+<h2>Forces add up</h2>
+
+<p>When several forces act on a particle, Newton's law uses their vector sum:</p>
+
+$$\mathbf{F} = \sum_k \mathbf{F}_k = m\,\mathbf{g} + \mathbf{F}_\text{drag} + \dots$$
+
+<p>This is the main reason to write a separate <code>force</code> function: every new effect is one more term. The
+most useful second term is <b>drag</b>, the resistance of the air or liquid the particle moves through. It always
+points against the velocity, and two simple models cover most needs.</p>
+
+<p><b>Linear drag</b> is proportional to velocity:</p>
+
+$$\mathbf{F}_\text{drag} = -c\,\mathbf{v},$$
+
+<p>with a coefficient $c$ in N&middot;s/m. It describes slow motion through thick fluids, such as a bead sinking in
+honey or a fine dust grain in air, and it is a common, cheap way to calm a simulation down.</p>
+
+<p><b>Quadratic drag</b> grows with the square of the speed:</p>
+
+$$\mathbf{F}_\text{drag} = -c_2\,|\mathbf{v}|\,\mathbf{v}, \qquad c_2 = \tfrac12\,\rho\,C_d\,A,$$
+
+<p>where $\rho$ is the fluid density (1.2 kg/m³ for air), $A$ the frontal area and $C_d$ a dimensionless drag
+coefficient (about 0.5 for a sphere). Written as $|\mathbf{v}|\,\mathbf{v}$, the force has magnitude $c_2 v^2$ and
+points against the motion. This is the right model for ordinary objects moving at ordinary speeds in air. For a tennis
+ball of radius 3.35 cm, $c_2 \approx 0.0011$ kg/m.</p>
+
+<pre><code class="language-js">function force(p) {
+  let f = V.v(0, -mass * gravity);                                  // weight
+  if (dragModel.value === 'linear') {
+    f = V.addScaled(f, p.v, -cLin.value);                           // -c v
+  } else if (dragModel.value === 'quadratic') {
+    f = V.addScaled(f, p.v, -cQuad.value * V.len(p.v));             // -c2 |v| v
+  }
+  return f;
+}</code></pre>
+
+<p>Turn on linear drag in the projectile scene. The particle now falls short of the dashed parabola and comes down
+more steeply than it went up. The orange dashed curve is the exact solution with linear drag, which we can still
+write down: with $\tau = m / c$ and $v_t = m g / c$,</p>
+
+$$x(t) = v_{0x}\,\tau\,(1 - e^{-t/\tau}), \qquad y(t) = (v_{0y} + v_t)\,\tau\,(1 - e^{-t/\tau}) - v_t\,t.$$
+
+<p>The simulated trail lies on it: with $c = 0.5$ N&middot;s/m the particle lands at 4.958 m, and the exact curve
+says 4.952 m. Quadratic drag couples the $x$ and $y$ motions (the drag on $v_x$ depends on $v_y$
+through $|\mathbf{v}|$), and there is no closed form for the full flight. That is typical: the exact answers run out
+quickly, and the simulation keeps going.</p>
+
+<h2>Terminal velocity</h2>
+
+<p>Drop a particle from rest with drag switched on. At first it is slow, drag is negligible and it accelerates at
+$g$. As it speeds up, drag grows, until drag balances weight. At that point the net force is zero, the acceleration is
+zero, and the speed stops changing. That speed is the <b>terminal velocity</b> $v_t$. Set the forces equal and solve:</p>
+
+$$\text{linear: } c\,v_t = m g \;\Rightarrow\; v_t = \frac{m g}{c}, \qquad
+\text{quadratic: } c_2\,v_t^2 = m g \;\Rightarrow\; v_t = \sqrt{\frac{m g}{c_2}}.$$
+
+<p>Here mass matters: a heavier object with the same drag coefficient falls faster, because its weight needs more drag
+to balance. The tennis ball (57 g) reaches about 23 m/s.</p>
+
+<p>We can also say how quickly the speed gets there. For linear drag the speed approaches $v_t$ exponentially,</p>
+
+$$v(t) = v_t\,\bigl(1 - e^{-t/\tau}\bigr), \qquad \tau = \frac{m}{c},$$
+
+<p>so after three time constants it is at 95 % of $v_t$. For quadratic drag, $v(t) = v_t \tanh(g t / v_t)$. The
+"terminal velocity" scene drops a 0.5 kg particle with the camera following it. With linear drag and $c = 0.5$
+N&middot;s/m, $v_t = 9.81$ m/s and $\tau = 1$ s; the simulation reads 9.32 m/s after 3 s (the formula says 9.322) and
+then settles on 9.8100. With quadratic drag and $c_2 = 0.05$ kg/m, $v_t = \sqrt{98.1} = 9.905$ m/s.</p>
+
+<p>The simulated terminal speed matches the formula to every printed digit, even at a large time step. That is not a
+coincidence: at terminal velocity the acceleration is zero, so the update $\mathbf{v}_{n+1} = \mathbf{v}_n +
+h\,\mathbf{a}_n$ leaves the velocity alone. The steady state of the update is the steady state of the physics. Only
+the <i>approach</i> to it carries a time-step error.</p>
+
+<div class="warning">
+<p><b>Drag can blow up too.</b> With linear drag alone, one step multiplies the velocity by $(1 - h c / m)$. If
+$h c / m$ exceeds 1 the velocity flips sign every step, and beyond 2 it grows without limit: the drag "overshoots".
+With $m = 0.5$ kg and $h = 0.05$ s that needs $c &gt; 20$ N&middot;s/m, far above the demo's slider, but very light
+particles with strong drag hit this limit easily. It is your first glimpse of a stability limit, the main topic of
+the next chapter.</p>
+</div>
+
+<h2>A word about the time step</h2>
+
+<p>Every result above depends on $h$. Keep it <b>fixed</b>. If you pass the measured frame time into the update, a
+single slow frame becomes a giant step, and the error (or worse, an instability) depends on what else your computer
+was doing. The standard pattern is to run as many fixed steps as fit into the elapsed time. The sandbox lets you set
+$h$ and the number of steps per drawn frame, and the demo picks enough steps of the chosen size to keep pace with real
+time. Why fixed steps matter so much, and how to choose $h$, is the subject of
+<a href="03-time-integration.html">Time Integration</a>.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>make the projectile move</h4>
+<p>Open the starter (<a href="../code/run.html?src=02-particles/starter.js" target="_blank">run it</a>,
+<a href="../code/02-particles/starter.js" target="_blank">read it</a>). The scenes, the exact parabola and all the
+readouts are there, but the particle sits at the origin because <code>force</code> returns zero and
+<code>integrate</code> is empty. Fill in the parts marked <code>TODO 1</code>:</p>
+<ol>
+<li>In <code>force</code>, start from the weight $m\mathbf{g}$, pointing down.</li>
+<li>In <code>integrate</code>, compute $\mathbf{a} = \mathbf{F}/m$, then update position and velocity.</li>
+</ol>
+<p>When it works, the particle flies along the dashed parabola and stops at the landing mark, and the fountain
+scene sprays particles (they fall through the floor until you do the last exercise).</p>
+</div>
+
+<details class="hint"><summary>Hint: the vector helpers</summary>
+<p><code>V.addScaled(a, b, s)</code> returns $a + s\,b$, which is the shape of both update lines. The helpers return
+new objects, so assign the result back: <code>p.x = V.addScaled(p.x, p.v, h)</code>.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Compare with <a href="../code/02-particles/solution.js" target="_blank">solution.js</a>:</p>
+<pre><code class="language-js">function force(p) {
+  let f = V.v(0, -mass * gravity);
+  // (drag terms come in exercise 3)
+  return f;
+}
+
+function integrate(p, h) {
+  const a = V.scale(force(p), 1 / mass);
+  p.x = V.addScaled(p.x, p.v, h);
+  p.v = V.addScaled(p.v, a, h);
+}</code></pre>
+</details>
+
+<div class="exercise">
+<h4>predict where it lands</h4>
+<p>Set the launch speed to 12 m/s and the angle to 30°. On paper, compute the range $R$ and the flight time. Then
+predict how far beyond $R$ the simulated particle will land at a time step of 50 ms. Write both numbers down, run
+it, and compare. Finally, find the angle that gives the longest range, and explain from the formula why 30° and 60°
+land in the same place (in the exact solution; do they in the simulation?).</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>$R = v_0^2 \sin 2\theta / g$. The simulated particle lands one time step late, so it overshoots by
+$v_0\cos\theta\; h$.</p>
+</details>
+
+<details class="hint"><summary>Answer</summary>
+<p>$R = 144 \times \sin 60° / 9.81 = 12.71$ m and $T = 1.223$ s. The overshoot at 50 ms is
+$12 \cos 30° \times 0.05 = 0.52$ m. The longest range is at 45°, where $\sin 2\theta = 1$. Since
+$\sin 2\theta = \sin(180° - 2\theta)$, angles $\theta$ and $90° - \theta$ give the same exact range. In the simulation
+they do not quite: the overshoot $v_0\cos\theta\,h$ is larger for the flatter throw.</p>
+</details>
+
+<div class="exercise">
+<h4>add drag, and predict terminal velocity first</h4>
+<p>Fill in <code>TODO 3</code> in <code>force</code>: linear drag $-c\,\mathbf{v}$ and quadratic drag
+$-c_2|\mathbf{v}|\mathbf{v}$. Then, <i>before running</i>, predict for the 0.5 kg particle:</p>
+<ol>
+<li>the terminal velocity with linear drag and $c = 0.25$ N&middot;s/m, and how long it takes to reach 95 % of it;</li>
+<li>the terminal velocity with quadratic drag and $c_2 = 0.02$ kg/m.</li>
+</ol>
+<p>Measure both in the "terminal velocity" scene. Then switch to the projectile scene with linear drag and check that
+the trail follows the orange curve.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>For the quadratic case the force is <code>V.addScaled(f, p.v, -c2 * V.len(p.v))</code>: scaling $\mathbf{v}$ by
+$|\mathbf{v}|$ gives a vector of length $v^2$ along the motion.</p>
+</details>
+
+<details class="hint"><summary>Answer</summary>
+<p>Linear: $v_t = 0.5 \times 9.81 / 0.25 = 19.62$ m/s, with $\tau = m/c = 2$ s, so 95 % after $3\tau = 6$ s.
+Quadratic: $v_t = \sqrt{0.5 \times 9.81 / 0.02} = 15.66$ m/s. The code is the <code>force</code> function shown in
+<i>Forces add up</i> above.</p>
+</details>
+
+<div class="exercise">
+<h4>restitution and energy loss</h4>
+<p>Fill in <code>TODO 4</code>, <code>collideGround</code>. In the "bouncing ball" scene the ball starts 2 m up.
+With $e = 0.5$, predict the first two peak heights and the fraction of energy lost per bounce, then measure them.
+Next set $e = 1$ and compare a 2 ms step with a 30 ms step. Which one keeps the peak at 2 m, and where does the extra
+energy in the other one come from?</p>
+</div>
+
+<details class="hint"><summary>Answer</summary>
+<pre><code class="language-js">function collideGround(p) {
+  if (p.x.y &lt; 0) {
+    p.x.y = 0;
+    if (p.v.y &lt; 0) p.v.y = -restitution.value * p.v.y;
+  }
+}</code></pre>
+<p>Peaks $2 \times 0.25 = 0.5$ m and $0.125$ m; 75 % of the energy is lost per bounce. With $e = 1$ the 2 ms run
+stays close to 2 m (it creeps up by one or two centimetres per bounce), while the 30 ms run gains visibly: every step
+moves with the velocity from the start of the step, which adds $\tfrac12 m g^2 h^2$ of energy per step. That error
+is the subject of the next chapter.</p>
+</details>
+
+<div class="paper">
+<h4>particles in the MPM papers</h4>
+<p>The MPM course notes and the APIC paper describe a material as a set of particles, each carrying a mass $m_p$, a
+position $\mathbf{x}_p$ and a velocity $\mathbf{v}_p$: exactly the state of this chapter, with the subscript $p$ for
+"particle". What they add, in their sections on transferring to and from the grid, is a way for particles to feel
+each other's forces through a background grid. Gravity still enters as $m\mathbf{g}$, added to the grid momentum each
+step, and the particle positions still advance as $\mathbf{x}_p \leftarrow \mathbf{x}_p + h\,\mathbf{v}_p$.</p>
+</div>
+
+<h2>Summary</h2>
+<ul>
+<li>A particle's state is its position and velocity. Mass is a fixed property. Use SI units with $y$ up and
+$\mathbf{g} = (0, -9.81)$ m/s².</li>
+<li>Newton's second law, $\mathbf{F} = m\mathbf{a}$, turns forces into acceleration; acceleration changes velocity,
+and velocity changes position.</li>
+<li>The update loop advances both by a fixed time step $h$. The simplest version is first order: its error shrinks in
+proportion to $h$, and for a projectile it lands exactly one step late.</li>
+<li>Ground contact: project back onto the surface and reflect the normal velocity with restitution $e$; each bounce
+keeps $e^2$ of the energy.</li>
+<li>Forces add as vectors. Linear drag $-c\mathbf{v}$ and quadratic drag $-c_2|\mathbf{v}|\mathbf{v}$ give terminal
+velocities $mg/c$ and $\sqrt{mg/c_2}$.</li>
+<li>Compare with a closed form whenever one exists.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Why does a force change a particle's position only indirectly?</li>
+<li>A ball is dropped from 1.25 m with $e = 0.6$. How high is its second peak (after two bounces)?</li>
+<li>Why does the simulated terminal velocity match $mg/c$ exactly, even though the simulated projectile does not
+land exactly at $R$?</li>
+<li>A skydiver of 80 kg falls at 55 m/s. Assuming quadratic drag, what is $c_2$?</li>
+<li>Why should the time step be fixed rather than taken from the frame time?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

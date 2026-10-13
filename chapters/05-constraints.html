@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Constraints and Multipliers · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="05-constraints" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Constraints and Multipliers</h1>
+<p class="subtitle">When a spring can never be stiff enough, stop using a spring.</p>
+
+<p>Some connections should not stretch at all. A pendulum's rod, the links of a chain, the threads of a rope under
+load: in the real world they stretch by fractions of a millimetre, and a simulation that lets them stretch by
+centimetres looks rubbery and wrong. The obvious fix is a stiffer spring, and the last two chapters told you how that
+ends. Stiffness raises the frequency $\omega$, and once $h\omega$ passes 2 the simulation explodes.</p>
+
+<p>This chapter takes a different route. Instead of a force that <i>pushes back</i> when the length is wrong, we state
+the rule the motion must obey, "the distance stays $L$", and enforce it directly. That rule is a
+<b>constraint</b>. You will learn how to write constraints as equations, why the force that enforces them points
+where it does and does no work, what the mysterious multiplier $\lambda$ means physically, and the simplest way to
+enforce a constraint in code: by moving positions. By the end you will have a pendulum whose rod length is exact to
+the last bit at any time step, a double pendulum, and a rope that can go slack.</p>
+
+<h2>Why very stiff springs fail</h2>
+
+<p>Model a 1 kg pendulum bob on a 1 m rod as a spring of stiffness $k$. Released from 60°, the bob swings through the
+bottom with a rod tension of about 19.6 N (we will derive that number shortly). The spring stretches by tension
+divided by stiffness, so at $k = 10^4$ N/m the rod is about 2 mm too long at the bottom, and it bounces along its
+length as it swings.</p>
+
+<p>To bring the error down to 0.1 mm we need $k \approx 19.6 / 0.0001 \approx 196{,}000$ N/m. The radial wobble of the
+bob then has $\omega = \sqrt{k/m} \approx 443$ rad/s, and symplectic Euler is stable only while $h\omega \le 2$, so
+$h \le 4.5$ ms. At a game's 16 ms the limit is $k \le 4m/h^2 = 15{,}625$ N/m. Every tenfold reduction in stretch costs
+a factor $\sqrt{10} \approx 3.2$ in time step, and an infinitely stiff rod would need an infinitely small step. The
+spring is fighting the wrong battle: it tries to make a <i>force</i> large enough, when what we actually want is a
+<i>geometric fact</i>.</p>
+
+<h2>Constraints as equations</h2>
+
+<p>A constraint is a function of the positions that must be zero (or non-negative). For the pendulum, with the bob at
+$\mathbf{x}$ and the pivot at $\mathbf{p}$,</p>
+
+$$C(\mathbf{x}) = |\mathbf{x} - \mathbf{p}| - L = 0.$$
+
+<p>This is a <b>bilateral</b> or equality constraint: the bob may be neither closer nor further than $L$. Other
+everyday constraints are inequalities, called <b>unilateral</b>:</p>
+
+<ul>
+<li>the ground: $C(\mathbf{x}) = y \ge 0$, the particle may be anywhere above the floor but not below it;</li>
+<li>a rope: $C(\mathbf{x}) = L - |\mathbf{x} - \mathbf{p}| \ge 0$, the end may come closer to the anchor (the rope goes
+slack) but not further.</li>
+</ul>
+
+<p>The <b>gradient</b> $\nabla C$ is the vector of partial derivatives of $C$ with respect to the coordinates of the
+particle. It points in the direction in which $C$ increases fastest, and it is perpendicular to the set of positions
+where $C = 0$. For the distance constraint,</p>
+
+$$\nabla C = \frac{\mathbf{x} - \mathbf{p}}{|\mathbf{x} - \mathbf{p}|} = \mathbf{n},$$
+
+<p>the unit vector from the pivot to the bob. Moving along $\mathbf{n}$ changes the length; moving perpendicular to it
+(around the circle) does not. For the ground, $\nabla C = (0, 1)$. When a constraint involves several particles, each
+particle gets its own gradient: for a distance constraint between $a$ and $b$, $\nabla_a C = \mathbf{n}$ and
+$\nabla_b C = -\mathbf{n}$, with $\mathbf{n}$ now pointing from $b$ to $a$.</p>
+
+<h2>The constraint force does no work</h2>
+
+<p>Suppose the bob is moving and obeys the constraint at every instant. Then $C$ stays zero, so its rate of change is
+zero. By the chain rule,</p>
+
+$$\frac{dC}{dt} = \nabla C \cdot \mathbf{v} = 0.$$
+
+<p>Every velocity the constraint allows is perpendicular to $\nabla C$. Now ask what force the rod must exert. We want
+a force that changes nothing the constraint allows and only stops what it forbids, so it should point along
+$\nabla C$:</p>
+
+$$\mathbf{F}_c = \lambda\,\nabla C.$$
+
+<p>The scalar $\lambda$ is called the <b>Lagrange multiplier</b>. Its power, the rate at which it does work, is
+$\mathbf{F}_c \cdot \mathbf{v} = \lambda\,\nabla C \cdot \mathbf{v} = 0$. An ideal constraint never adds or removes
+energy; it only redirects motion. That is the property a perfect rod, a frictionless floor or a frictionless hinge
+has, and it is why constraint forces are written this way in every textbook and paper you will read.</p>
+
+<p>The direction is fixed by the geometry. The <i>size</i>, $\lambda$, is whatever it takes to keep $C = 0$, and that
+is the physically interesting part: for a rod, $|\lambda|$ is the tension. Here $\nabla C$ points outward, the rod
+pulls the bob inward, so $\lambda = -T &lt; 0$. Newton's law along the rod gives the tension directly. The bob moves
+on a circle, so it needs a net inward (centripetal) force $m v^2/L$; the rod supplies that plus whatever balances the
+outward component of gravity, $m g\cos\theta$ at angle $\theta$ from the bottom:</p>
+
+$$T = m g\cos\theta + \frac{m v^2}{L}, \qquad T_\text{bottom} = m g + \frac{m v^2}{L}.$$
+
+<p>Released from rest at $\theta_0$, energy conservation gives $v^2 = 2gL(1 - \cos\theta_0)$ at the bottom, so
+$T_\text{bottom} = m g\,(3 - 2\cos\theta_0)$. From 60° that is $2mg = 19.62$ N, twice the bob's weight; from the
+horizontal it is $3mg$.</p>
+
+<div class="demo" data-src="05-constraints/solution.js" data-height="500"
+     data-caption="Left (red): the rod as a stiff spring. Right (blue): the rod as a constraint enforced by projection. Same time step. The plot shows each rod's length error in millimetres."></div>
+
+<p>Run the demo at its default 16 ms step and $k = 10^4$ N/m. The red bob's rod error swings by up to 2.8 mm. Push the
+stiffness above about 15,600 N/m and the spring explodes, as predicted. The blue rod's error reads zero to every digit
+the readout shows (it is about $4 \times 10^{-16}$ m, the rounding error of a double), at any time step. That is the
+method we turn to now.</p>
+
+<h2>Enforcing a constraint by projecting positions</h2>
+
+<p>Here is a recipe that needs no stiffness at all. In each step:</p>
+
+<ol>
+<li><b>Predict.</b> Move the particle as if the constraint did not exist: $\mathbf{v} \leftarrow \mathbf{v} +
+h\,\mathbf{g}$, then $\mathbf{x}^* = \mathbf{x} + h\,\mathbf{v}$. The bob flies off along its tangent and ends up
+slightly outside the circle.</li>
+<li><b>Project.</b> Move $\mathbf{x}^*$ the shortest way back onto the constraint, along $\nabla C$.</li>
+<li><b>Update the velocity</b> from the change in position: $\mathbf{v} = (\mathbf{x}^* - \mathbf{x})/h$, then
+$\mathbf{x} \leftarrow \mathbf{x}^*$.</li>
+</ol>
+
+<p>Step 3 is the clever one. The projection in step 2 moved the particle; recomputing the velocity from the total
+displacement makes the velocity consistent with that move, which removes the part of the velocity that pointed off
+the constraint. The particle's state is now on the circle and moving along it.</p>
+
+<p>How far to move in step 2, and how to share the move between two particles? Look for the smallest correction
+$\Delta\mathbf{x}_i$ that fixes $C$. To first order, $C(\mathbf{x} + \Delta\mathbf{x}) \approx C + \sum_i \nabla_i C
+\cdot \Delta\mathbf{x}_i$, and we want that to be zero. Moving along each particle's gradient, and moving lighter
+particles more, means</p>
+
+$$\Delta\mathbf{x}_i = w_i\,\nabla_i C\;\lambda, \qquad
+\lambda = -\frac{C}{\sum_j w_j\,|\nabla_j C|^2},$$
+
+<p>where $w_i = 1/m_i$ is the inverse mass. (Substitute the first formula into the linearised condition and solve for
+$\lambda$; you get the second.) For a distance constraint both gradients have length 1, so $\lambda = -C/(w_a +
+w_b)$, and the two particles move in opposite directions by amounts in the ratio of their inverse masses. That keeps
+their centre of mass where it was: like a spring, a constraint is internal and cannot push the system along. A fixed
+pivot has $w = 0$ and does not move at all; the whole correction goes to the bob.</p>
+
+<pre><code class="language-js">// Enforce |xa - xb| = L. Returns lambda (kg m); lambda / h^2 is the force during this step.
+function projectDistance(c) {
+  const a = c.a, b = c.b;
+  const d = V.sub(a.x, b.x);
+  const len = V.len(d);
+  const C = len - c.L;
+  const wsum = a.w + b.w;
+  if (wsum === 0 || len &lt; 1e-12) return 0;
+  const n = V.scale(d, 1 / len);              // grad C for a; -n for b
+  const lambda = -C / wsum;
+  a.x = V.addScaled(a.x, n,  a.w * lambda);
+  b.x = V.addScaled(b.x, n, -b.w * lambda);
+  return lambda;
+}</code></pre>
+
+<p>For one constraint this lands exactly on $C = 0$ (the distance function is linear along $\mathbf{n}$), which is
+why the blue rod is exact. Notice what is missing: a stiffness. Nothing in the projection gets more dangerous as the
+rod gets "stiffer", because the rod is perfectly rigid by construction.</p>
+
+<div class="warning">
+<p><b>Use the predicted positions, not the old ones.</b> All the projections must act on $\mathbf{x}^*$, and the
+velocity must be computed from the old position you saved <i>before</i> predicting. A common bug is to project the old
+positions, or to overwrite the saved position before computing $\mathbf{v}$; the pendulum then either ignores the
+constraint or stops dead.</p>
+</div>
+
+<h2>Reading the force back out</h2>
+
+<p>The projection never computed a force, but it implies one. During a step, a constant force $\mathbf{F}$ would move a
+particle by $\tfrac12 h^2 \mathbf{F}/m$ more than its velocity alone, and in our update (velocity first, then position)
+by exactly $h^2 \mathbf{F}/m$. So the correction $\Delta\mathbf{x} = w\,\nabla C\,\lambda$ corresponds to a force</p>
+
+$$\mathbf{F}_c = \frac{\lambda}{h^2}\,\nabla C.$$
+
+<p>Compare with $\mathbf{F}_c = \lambda\,\nabla C$ above: the projection's $\lambda$ is the force multiplier times
+$h^2$. It has units of kg&middot;m, and dividing by $h^2$ gives newtons. (The XPBD chapter keeps exactly this
+position-level $\lambda$ and builds on it.) The demo prints $-\lambda/h^2$ for the blue rod and, at each pass through the
+bottom, $mg + mv^2/L$ from the bob's current speed. At $h = 1$ ms the first pass reads 19.540 N for both. Even at
+16 ms, where the step is crude, they agree to within 0.2 %: the projection is computing the tension, it just never
+needed to name it.</p>
+
+<h2>What projection costs: energy</h2>
+
+<p>Let the demo run. The red spring pendulum keeps swinging. The blue one, with its perfect rod, slowly dies down: at
+16 ms it loses about 21 % of its energy in the first second, and after 10 s it swings to 22° instead of 60°. At 4 ms
+it loses 6 % in the first second, at 1 ms under 2 %. The loss per second is roughly proportional to $h$, so it
+vanishes as the step shrinks, but at large steps it is strong.</p>
+
+<p>Where does it go? The predicted position is on the tangent line, slightly outside the circle, and the projection
+pulls it back along the radius. The resulting chord is shorter than the distance the bob "wanted" to travel, and the
+velocity recomputed from it is a little smaller each step. This <b>numerical damping</b> is a feature of every
+position-projection method. It makes them stable (energy can only leak out, never build up), and it is why they
+became popular in games, but it also means a position-based pendulum does not swing for long at 60 Hz. Two
+chapters ahead you will see the cure: many small steps instead of one big one
+(<a href="08-substepping.html">Small Steps</a>), which drives the loss down without making anything stiff.</p>
+
+<h2>The period of a pendulum</h2>
+
+<p>For small swings, $\sin\theta \approx \theta$ and the pendulum is a harmonic oscillator with period</p>
+
+$$T_0 = 2\pi\sqrt{\frac{L}{g}} = 2.006\ \text{s} \quad\text{for } L = 1\ \text{m}.$$
+
+<p>That formula is only the first term. The exact period for a release angle $\theta_0$ is
+$T = 4\sqrt{L/g}\;K\!\bigl(\sin(\theta_0/2)\bigr)$, where $K$ is the complete elliptic integral of the first kind, and
+its series starts</p>
+
+$$T = T_0\left(1 + \frac{\theta_0^2}{16} + \frac{11\,\theta_0^4}{3072} + \dots\right).$$
+
+<p>(A fast way to compute it exactly is $T = T_0 / \operatorname{AGM}(1, \cos(\theta_0/2))$, with the
+arithmetic-geometric mean; the demo does that.) At 10° the correction is 0.19 %; at 60° it is 7.3 %, giving
+$T = 2.153$ s; at 90° it is 18 %; near the top, at 170°, the period is 2.44 times $T_0$. Big swings are slow.</p>
+
+<p>The demo times each pass through the bottom. The spring pendulum reads 2.155 s at 60° (its rod is slightly longer
+on average, so it is slightly slow). The projected pendulum's first period at $h = 1$ ms is 2.146 s, then the
+periods shorten as its amplitude decays, exactly as the large-angle formula says they should.</p>
+
+<h2>Unilateral constraints: ropes and floors</h2>
+
+<p>An inequality constraint $C \ge 0$ is enforced only when it is violated. If the rope's end is closer to the anchor
+than $L$, the rope is slack and does nothing; if it is further, project it back exactly as for a rod. In code it is
+one line at the top of <code>projectDistance</code>:</p>
+
+<pre><code class="language-js">if (c.unilateral &amp;&amp; C &lt;= 0) return 0;   // shorter than L: slack, no force</code></pre>
+
+<p>Unilateral constraints can only pull (a rope) or only push (a floor), never both, so the multiplier has a sign
+restriction: the rope's tension is never negative. You have met one already. The ground collision of
+<a href="02-particles.html">chapter 02</a>, "if $y &lt; 0$, set $y = 0$", is a projection onto $C = y \ge 0$.</p>
+
+<p>Choose "rope vs rod" in the demo. Two bobs start at the bottom with the same sideways speed $v_0 = 5.86$ m/s, so
+$v_0^2 = 3.5\,gL$: enough to rise past the horizontal but not enough to loop. The rod (blue) can push as well as pull;
+its bob climbs to $\cos\theta = 1 - v_0^2/(2gL)$, that is 138.6°, and swings back. The rope (green) can only pull. Its
+tension $m g\cos\theta + m v^2/L$ reaches zero where $v^2 = -gL\cos\theta$; combining that with energy conservation
+gives</p>
+
+$$\cos\theta_\text{slack} = \frac{2gL - v_0^2}{3gL} = -\tfrac12, \qquad \theta_\text{slack} = 120°.$$
+
+<p>Beyond that angle the green bob leaves the circle and falls freely along a parabola inside it, until the rope snaps
+taut again. The demo reports the angle at which the rope first went slack. At $h = 1$ ms it reads 118.9° (and the rod
+reaches 136.1°); at 16 ms the numerical damping has already slowed the bobs, and the rope goes slack at 107°. When the
+rope snaps taut, the projection removes the bob's outward velocity entirely: a perfectly inelastic jerk, which is
+indeed how a rope behaves.</p>
+
+<h2>More than one constraint</h2>
+
+<p>Hang a second bob from the first and you have a <b>double pendulum</b>, two constraints sharing a particle. Project
+the first link and you move bob 1, which breaks the second link; project the second and you move bob 1 again, which
+breaks the first. A single pass no longer lands on $C = 0$ for both.</p>
+
+<p>The simplest remedy is to loop: project every constraint in turn, and repeat. Each pass shrinks the errors, and
+after a handful of passes they are negligible. The demo uses 20 passes per step, which brings both link errors below
+$10^{-5}$ mm. This "keep cycling through the constraints" loop is a method with a name, Gauss-Seidel iteration, and
+the next chapter, <a href="06-pbd.html">Position-Based Dynamics</a>, builds a complete simulator around it, along
+with its most important weakness.</p>
+
+<p>The double pendulum is also famously chaotic: two releases that differ by a hair diverge completely within seconds.
+Do not expect your trajectory to match the reference solution's, or even your own after a small change; compare the
+link errors and the energy instead.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>implement the projection</h4>
+<p>Open the starter (<a href="../code/run.html?src=05-constraints/starter.js" target="_blank">run it</a>,
+<a href="../code/05-constraints/starter.js" target="_blank">read it</a>). The red spring pendulum works. The blue bob
+falls straight off the screen, because <code>projectDistance</code> returns without moving anything. Fill in
+<code>TODO 1</code>: compute $C$, $\mathbf{n}$ and $\lambda = -C/(w_a + w_b)$, move both particles, and return
+$\lambda$. The predict and velocity-update steps around it are already written in <code>stepConstrained</code>.</p>
+<p>When it works, the blue bob swings on a rod whose error reads zero, at every time step.</p>
+</div>
+
+<details class="hint"><summary>Hint: which way is the gradient?</summary>
+<p>With $\mathbf{d} = \mathbf{x}_a - \mathbf{x}_b$, the gradient of $|\mathbf{d}| - L$ with respect to
+$\mathbf{x}_a$ is $\mathbf{d}/|\mathbf{d}|$. If the rod is too long, $C &gt; 0$, $\lambda &lt; 0$, and $a$ moves along
+$-\mathbf{n}$, toward $b$. If your bob is flung outward instead, a sign is flipped.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>The function shown in <i>Enforcing a constraint by projecting positions</i>, plus the unilateral line from exercise
+4; compare with <a href="../code/05-constraints/solution.js" target="_blank">solution.js</a>.</p>
+</details>
+
+<div class="exercise">
+<h4>compute the tension at the bottom</h4>
+<p>Before running, compute the rod tension at the bottom of the swing for a 1 kg bob on a 1 m rod released from 60°,
+and again from 90° and from 120°. Then run each release at $h = 1$ ms and compare the "tension at bottom" readout
+($-\lambda/h^2$ at the first pass) with your numbers and with the "$mg + mv^2/L$" readout. Why does the readout drift
+below your prediction on later passes, and more so at $h = 16$ ms?</p>
+</div>
+
+<details class="hint"><summary>Answer</summary>
+<p>$T = mg(3 - 2\cos\theta_0)$: 19.62 N at 60°, 29.43 N at 90°, 39.24 N at 120°. At 1 ms the first pass reads
+19.54, 29.20 and 38.80 N, slightly low because a little energy has already leaked away in the first quarter swing. The
+projection's estimate tracks $mg + mv^2/L$ closely; both fall below the exact value as numerical damping removes energy, so the bob passes the bottom
+more slowly each time. The loss per second is roughly proportional to $h$.</p>
+</details>
+
+<div class="exercise">
+<h4>build a double pendulum</h4>
+<p>Choose "double pendulum". The two links are set up in <code>links</code>, but the loop in
+<code>stepConstrained</code> is empty (<code>TODO 3</code>), so both bobs fall. Project both links inside the loop and
+accumulate their multipliers. Then experiment: how many passes do you need before the link errors stay below 1 mm at
+16 ms? What happens with a single pass? Does the order of the two projections matter?</p>
+</div>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">for (let it = 0; it &lt; 20; it++) {
+  lambdas[0] += projectDistance(links[0]);
+  lambdas[1] += projectDistance(links[1]);
+}</code></pre>
+<p>At 16 ms, one pass lets the links stretch by up to about 8 mm during fast swings, three passes by about 1 mm, and
+five by 0.25 mm. Swapping the order changes which link carries the leftover error, a first taste of the
+order-dependence of Gauss-Seidel.</p>
+</details>
+
+<div class="exercise">
+<h4>make a rope that can go slack</h4>
+<p>Choose "rope vs rod". Both bobs are on rods for now, so they move together. Add <code>TODO 4</code>: the green
+link is marked <code>unilateral</code>, and a unilateral constraint must do nothing when $C \le 0$. Predict the slack
+angle for $v_0 = 5.86$ m/s before running, then set $h = 1$ ms and measure it. Next, find the smallest launch speed for
+which the rope never goes slack, and check it against $v_0^2 = 5gL$.</p>
+</div>
+
+<details class="hint"><summary>Answer</summary>
+<p>$\cos\theta_\text{slack} = (2 - 3.5)/3 = -0.5$, so 120°; the demo measures 118.9° at 1 ms. The rope stays taut all
+the way round if the tension at the top is still non-negative, $v_\text{top}^2 \ge gL$, which with energy conservation
+means $v_0^2 \ge 5gL$, or $v_0 \ge 7.00$ m/s. Below $v_0^2 = 2gL$ ($v_0 = 4.43$ m/s) the bob never rises past the
+horizontal, the tension never reaches zero, and rope and rod behave the same. Because of numerical damping, you will
+need a little more than 7.00 m/s at large time steps.</p>
+</details>
+
+<div class="paper">
+<h4>positions first</h4>
+<p>The recipe of this chapter, predict, project positions, derive velocities from displacements, is the skeleton of
+position-based dynamics, and it is also the skeleton of the PB-MPM paper. That paper's central quantity is each
+particle's displacement over the step, $\mathbf{d}_p = h\,\mathbf{v}_p$, which it iteratively corrects (through a
+grid) until the material's constraints are satisfied, and only then turns back into a velocity. The authors present
+their method as a position-based alternative to explicit and implicit MPM, for exactly the reason this chapter opened
+with: it does not have to resolve the stiffest wobble with a tiny time step. You will build it in
+<a href="27-pbmpm.html">Position-Based MPM</a>.</p>
+</div>
+
+<h2>Summary</h2>
+<ul>
+<li>A stiff spring trades error for time step: halving the stretch requires a stiffer spring and a smaller step, with
+no end.</li>
+<li>A constraint is a function $C(\mathbf{x})$ that must be zero (bilateral) or non-negative (unilateral: floors,
+ropes). Its gradient is perpendicular to the allowed motions.</li>
+<li>The ideal constraint force is $\lambda\nabla C$. It does no work, and $|\lambda|$ is the physical force: the
+tension in a rod.</li>
+<li>Projection enforces a constraint without stiffness: predict, move positions along $\nabla C$ weighted by inverse
+mass, $\lambda = -C/\sum w_j|\nabla_j C|^2$, then set $\mathbf{v} = \Delta\mathbf{x}/h$. Fixed points have $w = 0$.</li>
+<li>The projection's $\lambda$ divided by $h^2$ is the constraint force. Projection is exact in length but damps
+energy, with a loss that shrinks with $h$.</li>
+<li>Several coupled constraints need repeated passes: the subject of the next chapter.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Why must the constraint force point along $\nabla C$?</li>
+<li>A 0.5 kg bob on a 0.8 m rod is released from the horizontal. What is the rod tension at the bottom?</li>
+<li>In the projection, why is the velocity recomputed from positions instead of being kept?</li>
+<li>A particle of 1 kg and one of 3 kg are joined by a rod that is 4 cm too long. How far does each move in one
+projection?</li>
+<li>What does a pendulum's period do as its release angle approaches 180°?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Introduction · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="00-introduction" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Introduction</h1>
+<p class="subtitle">What you will build, how the site works, and how to get the most out of it.</p>
+
+<p>Physics simulation looks like magic from the outside. A rope swings, cloth drapes over a chair, a snowball bursts
+into powder, water sloshes around a glass. Under the hood, every one of these is the same small loop run many times a
+second: look at the current state of the world, work out the forces or constraints acting on it, and move everything a
+tiny step forward in time. The craft is in the details of that step, and those details are what this site teaches.</p>
+
+<p>We will start with the smallest possible simulation, one particle falling under gravity, and add one idea per
+chapter until you can write the methods used for snow, sand and fluid in modern film and games. You will not just read
+about them. Each chapter ends with you implementing the idea yourself.</p>
+
+<h2>What you will build</h2>
+
+<p>The chapters fall into eight parts.</p>
+
+<ul>
+<li><b>Foundations.</b> Particles, forces and Newton's laws; the integrator, the few lines of code that decide whether
+your simulation is stable or explodes; springs, damping and energy.</li>
+<li><b>Constraints.</b> Instead of springs that try to keep a rope's length, constraints that simply enforce it:
+Position-Based Dynamics (PBD), its modern form XPBD that gets stiffness right, substepping, and what a linear solver
+actually does when it "solves" a system.</li>
+<li><b>Rods.</b> Rotations and rigid bodies, the beam theory every engineer learns, Cosserat rods that bend and twist,
+and cable-driven tentacles that curl when you pull a wire.</li>
+<li><b>Contact.</b> Finding collisions quickly and without missing fast objects, then resolving them with friction,
+including the surprising rope-around-a-post effect that lets a sailor hold a ship with one hand.</li>
+<li><b>Soft bodies.</b> Cloth and thin shells, inflated bodies under pressure, coupling a stiff object to a soft one
+when each is solved differently, and materials that move on their own, like muscles.</li>
+<li><b>Continuum mechanics and MPM.</b> The deformation gradient, stress, and hyperelastic materials; the particle-grid
+methods PIC, FLIP and APIC; the Material Point Method for jelly, snow and sand; implicit MPM; and Position-Based MPM.</li>
+<li><b>Reading the papers.</b> Guided walks through three papers, section by section, with every result derived.</li>
+<li><b>Making it real.</b> How to hunt down explosions systematically, and how to verify that your simulator computes
+what you think it does.</li>
+</ul>
+
+<h2>The papers</h2>
+
+<p>One goal shapes the whole site: by the end you should be able to sit down with three important papers and read
+them without getting lost.</p>
+
+<ol>
+<li><b>The Affine Particle-In-Cell Method</b> by Jiang, Schroeder, Selle, Teran and Stomakhin (SIGGRAPH 2015). It shows
+how to move velocity between particles and a grid without the smearing of PIC or the noise of FLIP, by giving each
+particle a little affine velocity field.</li>
+<li><b>The Material Point Method for Simulating Continuum Materials</b> by Jiang, Schroeder, Teran, Stomakhin and Selle
+(SIGGRAPH 2016 course notes). A 52-page tutorial covering continuum mechanics, hyperelasticity, and the explicit and
+implicit MPM algorithms.</li>
+<li><b>A Position Based Material Point Method</b> by Chris Lewin (SIGGRAPH 2024 talk). It combines MPM with the
+position-based solvers used in games, so that MPM stays stable at any time step.</li>
+</ol>
+
+<p>Papers are dense because their readers are experts: they skip steps that are "standard", use notation without
+introducing it, and leave derivations to supplements. The chapters before the reading guides build every one of those
+skipped steps. Along the way, boxes like this one point out where a paper says the same thing in its own words:</p>
+
+<div class="paper">
+<h4>an example</h4>
+<p>The MPM course notes call the green integrator from the <a href="03-time-integration.html">Time Integration</a>
+chapter "symplectic Euler". When the course writes $\mathbf{v}^{n+1}_i$, it means the velocity of grid node $i$ after the
+step; on this site that would be $v_i$ at step $n+1$.</p>
+</div>
+
+<h2>How each chapter works</h2>
+
+<p>The chapters follow the pattern that <a href="https://learnopengl.com" rel="noopener">LearnOpenGL</a> made popular for
+graphics: introduce an idea properly, show it working, and then let you build it.</p>
+
+<ol>
+<li><b>The problem.</b> Each chapter opens with something that does not work yet, or a question we cannot answer yet.</li>
+<li><b>The idea.</b> The physics and the maths, built up step by step, with small code snippets. Derivations are
+included where they help you understand; the rest is stated with a pointer.</li>
+<li><b>A running demo.</b> Every technique runs right in the page. Play with its sliders before reading the maths:
+having a feel for what happens makes the equations easier.</li>
+<li><b>Your turn.</b> Each chapter has a <b>starter file</b> that runs but is missing the interesting part, marked with
+<code>TODO</code> comments, and exercises that ask you to fill it in, predict a number, extend it, or break it. Hints are
+folded away; a reference solution is linked at the end.</li>
+<li><b>Questions to come back to.</b> A few short questions to answer from memory a few days later.</li>
+</ol>
+
+<div class="note">
+<p><b>Predict before you run.</b> Many exercises ask you to guess the result before you measure it. It feels slower,
+but it is the single most effective habit in this site. A wrong prediction tells you exactly which part of your mental
+model to fix; a right one tells you that you understand something, not just that the code works.</p>
+</div>
+
+<h2>What you need</h2>
+
+<p><b>A browser and a text editor.</b> All the code is plain JavaScript that runs in the browser, with no install and
+no build step. Download or clone the site, then open a starter through the runner page:</p>
+
+<pre><code>code/run.html?src=03-time-integration/starter.js</code></pre>
+
+<p>Edit <code>code/03-time-integration/starter.js</code>, save, and refresh the page. Some browsers do not allow pages
+opened straight from disk to load other scripts; if the runner shows a blank page, serve the folder locally instead, for
+example with <code>python -m http.server</code> in the site folder, and open <code>http://localhost:8000</code>.</p>
+
+<p><b>Some programming.</b> If you can write loops, functions and arrays in any C-like language, you can follow the
+code. It is deliberately plain: no frameworks, no clever idioms, so that it ports easily to C#, C++, Rust or Python. If
+you prefer to work in another language or engine, do: the starters are a reference for what to build, not a cage.</p>
+
+<p><b>Maths, introduced as needed.</b> Vectors and derivatives are enough to begin. Matrices, eigenvalues, partial
+derivatives and a little linear algebra appear gradually, each explained the first time it is needed. The continuum
+chapters are the most mathematical; they build up slowly and use the earlier parts as stepping stones.</p>
+
+<h2>Conventions</h2>
+
+<ul>
+<li><b>Units are SI throughout:</b> metres, kilograms, seconds, newtons. A simulation that mixes units is a simulation
+with bugs.</li>
+<li><b>The world is 2D with y pointing up,</b> and gravity is $9.81\ \text{m/s}^2$ downward. Nearly every idea on this
+site carries over to 3D unchanged; where it does not (rotations, twisting rods, shells), the text explains the 3D version.</li>
+<li><b>Notation</b> is kept consistent across chapters and matched to the papers where possible: $h$ is the time step,
+$m$ a mass, $w = 1/m$ an inverse mass, $C$ a constraint, $\lambda$ a Lagrange multiplier, $\alpha$ a compliance,
+$\mathbf{F}$ the deformation gradient. Each symbol is introduced where it first appears.</li>
+</ul>
+
+<h2>A word on accuracy</h2>
+
+<p>Every demo on this site states what it should do and, where possible, checks itself against an exact answer: a
+pendulum's period, a beam's deflection, a rope's holding ratio. When a method is an approximation, the chapter says how
+good the approximation is and when it breaks. Simulation is full of methods that look right and are not; learning to
+tell the difference is half of the skill.</p>
+
+<p>Ready? The next chapter introduces the small sandbox library that every demo and starter uses.</p>
+
+<h3>Questions to come back to</h3>
+<ol>
+<li>In one sentence, what does every physics simulation do each time step?</li>
+<li>Which three papers is this site preparing you to read?</li>
+<li>Why does the site ask you to predict results before running the code?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

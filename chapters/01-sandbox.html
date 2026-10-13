@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Sandbox · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="01-sandbox" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>The Sandbox</h1>
+<p class="subtitle">A tiny library that handles windows, drawing and sliders, so you only write the physics.</p>
+
+<p>Graphics tutorials spend their first chapters opening a window and setting up a render loop. We want to get to the
+physics quickly, so this site comes with a small library, <code>code/lib/sandbox.js</code>, that does all of that for
+you. It opens a canvas, runs a loop, draws shapes in metres instead of pixels, and gives you sliders, plots and the
+mouse. Every demo and every starter on the site uses it, so it is worth ten minutes to get comfortable with it.</p>
+
+<p>This chapter has no physics. By the end of it you will have a dot moving on a circle, an arrow following your mouse
+and a live plot, and you will know where everything you need later lives.</p>
+
+<h2>Running a script</h2>
+
+<p>A simulation script is a single JavaScript file. To run one, open the runner page with the script's path:</p>
+
+<pre><code>code/run.html?src=01-sandbox/starter.js</code></pre>
+
+<p>The runner loads the sandbox and then your script. When you change the file, save and refresh the page. If a script
+throws an error, the sandbox pauses and prints the error over the canvas, with the line number, so you do not need the
+developer tools for the common mistakes (but they are a keypress away, F12 in most browsers, when you do).</p>
+
+<div class="demo" data-src="01-sandbox/solution.js" data-height="420"
+     data-caption="The finished version of this chapter's exercise. Move the mouse over it."></div>
+
+<h2>The shape of a simulation</h2>
+
+<p>Every script has the same three functions and one call:</p>
+
+<pre><code class="language-js">let state;
+
+function reset() {          // build the initial state
+  state = { x: 0, y: 1 };
+}
+
+function step(dt) {         // advance the state by dt seconds
+  state.y -= 0.5 * dt;
+}
+
+function draw(g) {          // draw the current state
+  g.circle(state.x, state.y, 0.05);
+}
+
+Sim.run({ title: 'My first sim', view: [-1, 0, 1, 1.5], reset, step, draw });</code></pre>
+
+<p>This split is not just tidiness; it mirrors how real simulators are built.</p>
+
+<ul>
+<li><b><code>reset()</code></b> creates the world. The sandbox calls it once at the start, again when you press
+<b>R</b> or the Reset button, and whenever a control marked <code>{ reset: true }</code> changes. Keep all your initial
+values here, so a reset always gives the same starting point.</li>
+<li><b><code>step(dt)</code></b> moves the world forward by <code>dt</code> seconds. This is where all the physics goes.
+It must not draw anything, and it should not depend on how often the screen refreshes: the sandbox calls it with a
+fixed <code>dt</code> (1/60 s unless you choose otherwise), which, as you will see in the
+<a href="03-time-integration.html">Time Integration</a> chapter, matters a great deal.</li>
+<li><b><code>draw(g)</code></b> draws the world as it is now. It is called every frame, including while paused, so it
+must not change the state.</li>
+</ul>
+
+<p><code>Sim.run</code> starts the loop. Its options include the <code>view</code>, the rectangle of the world you want to
+see as <code>[xmin, ymin, xmax, ymax]</code> in metres, plus <code>dt</code> (a number, or a function such as
+<code>() =&gt; slider.value</code>) and <code>stepsPerFrame</code>, the number of <code>step</code> calls per drawn frame.</p>
+
+<p>The header has <b>Pause</b>, <b>Step</b> and <b>Reset</b> buttons, also on the keyboard as <b>Space</b>, <b>.</b>
+and <b>R</b>. Single-stepping a simulation frame by frame is one of the best debugging tools there is; get used to it
+now.</p>
+
+<h2>Drawing in metres</h2>
+
+<p>The <code>g</code> passed to <code>draw</code> draws in <b>world coordinates</b>: metres, with y pointing up, the way
+physics is written. The sandbox fits your <code>view</code> into the canvas, keeping the aspect ratio, and converts for
+you. A circle of radius 0.05 is always 5 cm, whatever the window size.</p>
+
+<pre><code class="language-js">g.circle(x, y, r, { fill: Sim.colors.blue });          // a filled disc of radius r metres
+g.circle(x, y, r, { stroke: Sim.colors.red, width: 2 }); // an outline, 2 pixels wide
+g.dot(x, y, 4, Sim.colors.ink);                          // a dot 4 pixels across at any zoom
+g.line(x1, y1, x2, y2, { color: Sim.colors.ink, width: 1.5, dash: [4, 4] });
+g.polyline(points, { color, closed: true, fill });       // points: [{x, y}, ...] or [x0, y0, x1, y1, ...]
+g.rect(x, y, w, h, { fill });                             // (x, y) is the bottom-left corner
+g.arrow(x, y, dx, dy, { color });                         // a vector, e.g. a force or a velocity
+g.text('label', x, y, { color, size, align });
+g.points(xs, ys, count, { radius: 2, color });            // thousands of particles from flat arrays
+g.ground(0);                                              // a floor at y = 0</code></pre>
+
+<p>Styles are optional. Widths are in pixels, everything else in metres. <code>Sim.colors</code> holds a small palette
+(<code>blue</code>, <code>red</code>, <code>green</code>, <code>orange</code>, <code>purple</code>, <code>teal</code>,
+<code>gray</code>, <code>ink</code>, <code>muted</code>), and <code>Sim.palette</code> is the same colours as an array
+for colouring many things.</p>
+
+<h2>Vectors</h2>
+
+<p>Most early chapters use small 2D vectors as plain <code>{x, y}</code> objects, with helpers on the global
+<code>V</code>:</p>
+
+<pre><code class="language-js">const a = V.v(1, 2), b = V.v(3, -1);
+V.add(a, b);          // {x: 4, y: 1}
+V.sub(a, b);          // a - b
+V.scale(a, 2);        // 2a
+V.addScaled(a, b, h); // a + h b, handy for integration
+V.dot(a, b);          // 1*3 + 2*(-1) = 1
+V.cross(a, b);        // the 2D cross product, a scalar: 1*(-1) - 2*3 = -7
+V.len(a); V.norm(a); V.perp(a); V.dist(a, b); V.lerp(a, b, t); V.rotate(a, angle);</code></pre>
+
+<p>They return new objects, which is clear and fast enough for a few hundred particles. The particle-grid chapters,
+with thousands of particles, switch to flat typed arrays (<code>xs[i]</code>, <code>ys[i]</code>) for speed.</p>
+
+<h2>Controls, readouts and the mouse</h2>
+
+<p>Controls are created at the top level of your script, before <code>Sim.run</code>, and appear in the panel to the
+right of the canvas. Each returns an object whose <code>.value</code> is always current, so you read it wherever you need
+it:</p>
+
+<pre><code class="language-js">const k = Sim.slider('stiffness k (N/m)', 0, 1000, 100);         // min, max, start
+const alpha = Sim.logSlider('compliance', -8, -2, 1e-5);           // powers of ten, for wide ranges
+const gravity = Sim.checkbox('gravity', true);
+const method = Sim.select('method', ['PBD', 'XPBD'], 'XPBD', { reset: true });
+Sim.button('kick', () =&gt; { ball.vx += 2; });</code></pre>
+
+<p>Passing <code>{ reset: true }</code> restarts the scene when the control changes, which is what you want for anything
+that changes the setup (the number of particles, the method), as opposed to a parameter you want to change live.</p>
+
+<p>Two readouts help you see what your simulation is doing. Call both from <code>draw</code>:</p>
+
+<pre><code class="language-js">Sim.show('energy (J)', E);                          // a line in the info box, this frame
+Sim.plot('energy', E, { color: Sim.colors.red });   // a scrolling graph, one sample per frame</code></pre>
+
+<p>Plots are the most underrated debugging tool in simulation. A number that should stay constant (energy, length,
+momentum) and does not is the first sign of a bug, and a plot shows you exactly when it started.</p>
+
+<p>The mouse is in world coordinates too: <code>Sim.mouse.x</code>, <code>Sim.mouse.y</code>,
+<code>Sim.mouse.down</code>, and <code>Sim.mouse.pressed</code> / <code>Sim.mouse.released</code>, which are true for the
+single frame on which the button went down or up. That is all you need to pick up and drag particles, which many demos
+let you do.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>bring the starter to life</h4>
+<p>Open the starter (<a href="../code/run.html?src=01-sandbox/starter.js" target="_blank">run it</a>,
+<a href="../code/01-sandbox/starter.js" target="_blank">read it</a>). The dot does not move. Fix the three
+<code>TODO</code>s:</p>
+<ol>
+<li>In <code>step</code>, advance the angle by the angular speed times <code>dt</code>.</li>
+<li>In <code>draw</code>, when the mouse is over the canvas, draw an arrow from the dot to the mouse and show its
+length.</li>
+<li>Plot the dot's x and y.</li>
+</ol>
+<p>Before you run it: what shape will the two plots have, and how will they be shifted relative to each other?</p>
+</div>
+
+<details class="hint"><summary>Hint: the arrow</summary>
+<p><code>g.arrow(x, y, dx, dy)</code> takes the start point and the vector, not the end point. The vector from the dot
+<code>p</code> to the mouse is <code>V.sub(V.v(Sim.mouse.x, Sim.mouse.y), p)</code>.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>See <a href="../code/01-sandbox/solution.js" target="_blank">solution.js</a>. The interesting lines:</p>
+<pre><code class="language-js">function step(dt) {
+  angle += speed.value * dt;
+  // ...
+}
+
+// in draw(g):
+const m = V.v(Sim.mouse.x, Sim.mouse.y);
+if (Sim.mouse.inside) {
+  const d = V.sub(m, p);
+  g.arrow(p.x, p.y, d.x, d.y, { color: Sim.colors.orange, width: 2 });
+  Sim.show('distance to mouse', V.len(d), 3);
+}
+Sim.plot('x', p.x, { color: Sim.colors.blue });
+Sim.plot('y', p.y, { color: Sim.colors.red });</code></pre>
+<p>The plots are a cosine and a sine: the same wave, a quarter of a turn apart.</p>
+</details>
+
+<div class="exercise">
+<h4>make it yours</h4>
+<p>Three small changes, each using a different part of the sandbox:</p>
+<ol>
+<li>Make the dot follow the mouse while the button is held, and return to the circle when released.</li>
+<li>Add a slider that changes the step size (<code>dt</code>), and watch what happens to the motion at large steps. Is
+the dot still on the circle? (It should be: we compute the position from the angle exactly. Remember this; it is not
+true of physics, as the next two chapters will show.)</li>
+<li>Draw a ring of twelve dots with <code>g.points</code> from two <code>Float64Array</code>s.</li>
+</ol>
+</div>
+
+<h2>Summary</h2>
+<ul>
+<li>A script is <code>reset</code>, <code>step(dt)</code> and <code>draw(g)</code>, started with <code>Sim.run</code>.
+State lives in your variables; <code>step</code> changes it, <code>draw</code> only looks.</li>
+<li>Everything is in metres with y up. <code>view</code> chooses what you see.</li>
+<li>Controls return objects with a live <code>.value</code>; <code>{ reset: true }</code> restarts the scene on change.</li>
+<li><code>Sim.show</code> and <code>Sim.plot</code> are your instruments. Use them on every quantity that should be
+conserved.</li>
+<li>Space, <b>.</b> and R pause, single-step and reset. Errors pause the run and appear on the canvas.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<ol>
+<li>Why must <code>draw</code> never change the simulation state?</li>
+<li>When should a control use <code>{ reset: true }</code>, and when not?</li>
+<li>What does <code>g.arrow(1, 0, 0, 2)</code> draw?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

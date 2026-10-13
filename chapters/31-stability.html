@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hunting Explosions · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="31-stability" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Hunting Explosions</h1>
+<p class="subtitle">A field guide to the ways a simulation blows up, and the tools that find which one it was.</p>
+
+<p>Every simulator explodes. Usually at the worst moment: in front of someone, after an hour of running fine, only
+on one machine, only when the user grabs that one object. The scene flickers, a particle shoots off at a thousand
+metres per second, and a frame later every number on screen reads <code>NaN</code>. By then the evidence is gone. What
+you see is the last frame of a chain of events that started somewhere small, many frames earlier.</p>
+
+<p>This chapter is about working backwards along that chain. It has two halves. The first is a catalogue of causes,
+each one something you have met in earlier chapters, now seen from the point of view of the person debugging it. The
+second is a toolkit: monitors that stop the simulation at the first bad frame and point at the first bad particle, a
+recorder that replays the failure exactly, and a fuzzer that finds failures you did not think to look for.</p>
+
+<p>By the end you will have written the watchdog and the fuzzer for a deliberately fragile scene, diagnosed three
+planted explosions without being told their cause, and you will know when a velocity clamp is an honest design
+decision and when it is hiding a bug.</p>
+
+<h2>What an explosion is</h2>
+
+<p>An explosion is energy appearing from nowhere. A closed system with no motors and no hand dragging it can only
+keep its energy or lose it (to friction, damping, inelastic collisions and the numerical damping of the integrator).
+Whenever the total energy of such a system rises, the numbers, not the physics, are doing it.</p>
+
+<p>It helps to recognise three signatures, because each points to a different family of causes.</p>
+
+<ul>
+<li><b>Growth.</b> The energy, or some error, is multiplied by a constant factor greater than 1 every step. On a log
+plot it is a straight line going up. This is an <i>instability</i>: some mode of the system, a pattern of motion, has a
+step matrix with an eigenvalue of magnitude above 1, exactly the analysis of the <a
+href="03-time-integration.html">time integration chapter</a>. It can start invisibly small and take seconds to show.</li>
+<li><b>A jump.</b> The energy rises a lot in a single frame, and then the system may calm down. Something injected
+energy once: a deep penetration resolved in one step, two bodies created overlapping, an actuator that snapped.</li>
+<li><b>NaN.</b> A number became "not a number", usually from $0/0$, $\infty - \infty$ or the square root of a
+negative. NaN is contagious: any arithmetic with it gives NaN, so within a frame or two every particle connected to the
+first one is NaN too.</li>
+</ul>
+
+<h2>The usual suspects</h2>
+
+<p>The demo for this chapter is a deliberately fragile scene, small enough to understand completely: a chain of ten
+50 g beads pinned at one end with a 0.5 kg weight at the other (XPBD distance constraints, ten Gauss-Seidel iterations
+per substep), a box of four 0.2 kg corners joined by six <i>explicit</i> springs of 2000 N/m (forces integrated with
+symplectic Euler, the way many games add springs to a position-based engine), and three 0.3 kg balls. It runs four
+substeps per 1/60 s frame, so $h = 1/240$ s. Each cause below can be planted with the <i>plant cause</i> button.</p>
+
+<h3>1. The time step against the fastest mode</h3>
+
+<p>An explicit spring is stable only while $h\omega \le 2$, where $\omega$ is the fastest angular frequency in the
+system. For the box (four equal masses $m$ with sides and diagonals of stiffness $k$) the fastest mode has
+$\omega_\text{max} = \sqrt{4k/m}$, which is $200$ rad/s for the defaults, so $h\omega = 0.83$. Comfortable. The limit
+$h\omega = 2$ is reached at</p>
+
+$$k_\text{crit} = \frac{m}{h^2} = 0.2 \times 240^2 = 11{,}520\ \text{N/m}.$$
+
+<p><i>Stiff box springs</i> multiplies the stiffness by ten, to 20,000 N/m and $h\omega = 2.64$. The step matrix of
+symplectic Euler then has an eigenvalue of $-4.73$: the error flips sign and grows almost fivefold every substep, about
+500-fold every frame. The box disintegrates within the frame it was planted in.</p>
+
+<h3>2. Mass ratios</h3>
+
+<p>The fastest mode is set by the stiffest spring on the <i>lightest</i> particle. <i>Tiny box mass</i> makes one
+corner a thousand times lighter, and with the stiffness unchanged the estimate becomes $h\omega \approx 26$. Mass
+ratios cause explosions in explicit force codes for exactly the same reason as stiffness: both live inside
+$\omega = \sqrt{k/m}$.</p>
+
+<p>In position-based solvers a mass ratio does something quieter. <i>Heavy weight</i> makes the chain's weight 1000
+times heavier than before, 10,000 times a bead. XPBD stays stable at any stiffness, but Gauss-Seidel converges slowly
+when a light bead sits between heavy neighbours (the <a href="08-substepping.html">substepping chapter</a>), so with ten
+iterations the chain stretches: its links grow by more than 2 cm within a quarter of a second. No energy is created;
+the failure is a constraint error. Not every bug is an explosion, which is why the watchdog below checks constraint
+errors too.</p>
+
+<h3>3. Stiffness ratios</h3>
+
+<p>The same story with springs in place of masses: a stiff constraint next to a soft one makes the stiff one the
+fastest mode in an explicit code, and slows Gauss-Seidel convergence in an implicit one. And when two solvers are
+coupled, the stiffness ratio decides whether the coupling iteration converges at all (the <a
+href="18-coupling.html">coupling chapter</a>).</p>
+
+<h3>4. Conflicting and redundant constraints</h3>
+
+<p>Constraints that cannot all hold at once, a rope pinned at two points farther apart than its length, or two
+constraints on the same pair asking for different distances, fight forever. Gauss-Seidel settles on whichever it
+solved last, the others stay violated, and positions jump between iterations and between frames. Because velocity is
+computed from position changes, that fighting turns into motion: energy from nowhere.</p>
+
+<p>Redundant constraints (more than needed, but consistent) are harmless for Gauss-Seidel and dangerous for Jacobi.
+Jacobi computes every correction from the same old positions and adds them up. Take a chain with a constraint between
+each pair of neighbours and also between next-neighbours, and an error pattern $u_i = \cos(i\theta)$ along it. Each
+iteration multiplies that pattern by $1 - \tfrac12\big(4 - 2\cos\theta - 2\cos 2\theta\big)$, and at $\cos\theta =
+-1/4$ that is $-2.125$. Ten iterations per substep multiply it by about 1900. <i>Jacobi with redundant links</i> plants
+exactly this. The fix is the one from the <a href="09-linear-solvers.html">solvers chapter</a>: divide each particle's
+summed correction by its number of constraints, or under-relax.</p>
+
+<h3>5. Bad initial states</h3>
+
+<p>A position-based solver resolves an overlap by moving the bodies apart, and then computes velocity as distance over
+time. Two balls created 15 cm deep inside each other are pushed apart in one substep, which means a velocity of the
+overlap divided by $h$: tens of metres per second, from nothing. <i>Overlapping balls</i> does this. The fix belongs to
+whoever creates the state: spawn objects apart, or ramp the separation in over several frames.</p>
+
+<h3>6. Collisions injecting energy</h3>
+
+<p>The same mechanism mid-simulation. A ball that ends a step 30 cm below the ground (it was fast, or something
+teleported it) is pushed out by its penetration $d = 0.38$ m in one substep, and leaves with</p>
+
+$$v = \frac{d}{h} = 0.38 \times 240 = 91\ \text{m/s}, \qquad \tfrac12 m v^2 = \tfrac12 \times 0.3 \times 91.2^2 \approx
+1248\ \text{J}.$$
+
+<p><i>Ball deep in the ground</i> plants it, and the watchdog reports an energy jump of 1249 J: the closed form plus
+the ball's small change in potential energy. Fast objects need continuous collision detection (the <a
+href="14-collision-detection.html">collision chapter</a>); deep overlaps need a separation speed limit, which is one
+of the honest clamps discussed at the end.</p>
+
+<h3>7. Division by small numbers</h3>
+
+<p>Every normalisation divides by a length, every position-based update divides by a sum of inverse masses, every
+pressure divides by a volume. When the divisor reaches zero you get infinity or NaN; when it gets small you get a
+huge but finite number, which is often worse because nothing flags it. <i>Coincident box corners</i> puts one corner
+exactly on another. The spring between them computes its direction as $(x_b - x_a)/|x_b - x_a| = 0/0$, which is NaN.</p>
+
+<div class="warning">
+<p><b>A safe normalise is a silent one.</b> A helper that returns a zero vector for a zero-length input (the sandbox's
+<code>V.norm</code> does) stops the NaN, and the spring then exerts no force at all. That may be right, or it may
+let two corners stay merged forever. Guards are fine, but decide what the physics should do in that case, and count
+how often the guard fires.</p>
+</div>
+
+<h3>8. NaN propagation</h3>
+
+<p>NaN has two properties that make it hard to trace. It spreads: one NaN position enters every constraint that touches
+it, and those constraints write NaN into every neighbour, so after a few iterations the whole connected body is NaN.
+And every comparison with NaN is false, so <code>if (d &lt; minDist)</code> silently skips a collision,
+<code>Math.max(NaN, 1)</code> is NaN, and a loop that searches for the largest error with <code>if (err &gt; best)</code>
+never picks the NaN one. By the time you notice, the particle where it started looks like all the others. The only
+reliable method is to check early and often, and record where the first one appeared.</p>
+
+<h2>The demo</h2>
+
+<p>Plant a cause and the watchdog stops the run at the first bad frame, circles the particle it blames and prints what
+it saw. The info box also shows three diagnostics: the box's estimated $h\omega$, the chain's mass ratio and its
+constraint count. Every frame's input (mouse position and button, and any planted causes) is recorded; <i>replay
+recording</i> resets and plays it back, and <i>replay to the frame before the trip</i> stops one frame early so you can
+press Step (or the <code>.</code> key) and watch the failure happen. Drag any body with the mouse; the watchdog
+ignores energy changes while you drag, because your hand is doing work.</p>
+
+<div class="demo" data-src="31-stability/solution.js" data-height="560"
+     data-caption="A fragile scene: plant a failure (or a mystery one) and let the watchdog find the first bad frame and particle."></div>
+
+<h2>Tool 1: monitors that stop at the first bad frame</h2>
+
+<p>A monitor is a function that looks at the state after every frame and decides whether it is plausible. Three
+cheap checks catch nearly everything in this chapter.</p>
+
+<p><b>Non-finite numbers.</b> After each phase of each substep (forces, integration, constraints), scan the particles
+for a position, velocity or force that is not finite. Record the first one with its frame, substep and phase, then
+stop recording: only the first matters. In the demo, coincident corners planted at frame 120 are reported as "NaN at
+frame 120, particle 11 (box), substep 0, after spring forces", which is precisely where the $0/0$ happened.</p>
+
+<pre><code class="language-js">function findNonFinite(S, fx, fy) {
+  for (let i = 0; i &lt; S.n; i++) {
+    if (!Number.isFinite(S.x[i]) || !Number.isFinite(S.y[i]) ||
+        !Number.isFinite(S.vx[i]) || !Number.isFinite(S.vy[i])) return i;
+    if (fx &amp;&amp; (!Number.isFinite(fx[i]) || !Number.isFinite(fy[i]))) return i;
+  }
+  return -1;
+}</code></pre>
+
+<p><b>Energy.</b> Measure the total energy (kinetic, gravitational, elastic) after this frame's input has been applied,
+and again at the end of the frame. If it rose by more than a tolerance while nothing external did work, trip. The
+tolerance must be bigger than the honest wobble of your integrator: here 1 J plus 1% of the total, against a scene
+energy that starts at 24 J and settles near 14 J. And blame the particle whose speed rose the most, not the one whose energy rose the most: a light
+particle can be very fast while carrying little energy.</p>
+
+<pre><code class="language-js">const tol = 1 + 0.01 * Math.abs(before.E);
+if (!external &amp;&amp; after.E - before.E &gt; tol) {
+  let worst = 0, gain = -Infinity;
+  for (let i = 0; i &lt; S.n; i++) {
+    if (after.speed[i] - before.speed[i] &gt; gain) { gain = after.speed[i] - before.speed[i]; worst = i; }
+  }
+  return { kind: 'energy jump', frame: S.frame - 1, particle: worst, detail: ... };
+}</code></pre>
+
+<p><b>Constraint error.</b> The largest violation of the constraints that should hold, here the chain's link lengths,
+against a tolerance (2 cm, a quarter of a link). This catches failures that create no energy, like the heavy weight.</p>
+
+<p>Momentum and angular momentum are worth monitoring too, in scenes where nothing external acts: internal forces
+cannot change them, so any drift is a bug (typically a constraint that does not push equally on both ends). The demo's
+scene is pinned and sits on the ground, so it has no conserved momentum to check.</p>
+
+<div class="note">
+<p><b>Monitors find the frame, not always the cause.</b> A frame here contains four substeps. A fast instability has
+already spread through a whole body by the end of its first frame, so the blamed particle may be a neighbour of the
+real culprit. Plant <i>tiny box mass</i>: the light corner is particle 13, and the watchdog blames corner 12, which
+the light corner flung away. The report narrows the search to a body and a frame; the diagnostics, the replay and the
+drawing do the rest.</p>
+</div>
+
+<h2>Tool 2: record, replay, reduce</h2>
+
+<p>A failure you cannot reproduce is a failure you cannot fix. The cure is to make the simulation a pure function of
+its inputs: a fixed time step (never the measured frame time), seeded random numbers, the same order of operations on
+every run, and no wall-clock time anywhere in the physics. Then record the inputs, one entry per frame:</p>
+
+<pre><code class="language-js">input = { x: Sim.mouse.x, y: Sim.mouse.y, down: Sim.mouse.down, events: pending };
+recording.push(input);
+for (const e of input.events) applyEvent(world, e);   // planted causes are inputs too
+stepScene(world, input);</code></pre>
+
+<p>To replay, reset the scene and feed it the recorded inputs instead of the live mouse. The demo stores a hash of the
+positions when the watchdog trips, and when the replay trips at the same frame it compares hashes: "replay reproduces
+it: yes, same state hash" means the replay is bit-for-bit the same run. Now you can stop one frame early and look.</p>
+
+<p>Deterministic replay holds on one machine with one build. Different compilers, CPUs and math libraries may round
+differently, and a chaotic simulation amplifies the difference, which is why "it only explodes on that machine" is
+often a numerical sensitivity, not a different bug.</p>
+
+<p>With a reproduction in hand, make it <b>minimal</b>. Remove bodies, constraints and features one at a time and
+replay; whatever you removed last before the failure disappeared is involved. A two-particle reproduction of a
+thousand-particle explosion usually explains itself.</p>
+
+<h2>Tool 3: draw what the solver sees</h2>
+
+<p>Most explosions are obvious once you can see the right quantity. Draw velocities as arrows (a particle about to
+explode often shakes visibly frames before), colour constraints by their error (the demo colours chain links orange
+above 5 mm and red above 2 cm), colour particles by mass or by the number of constraints touching them, and draw
+contact normals and penetration depths. Two minutes of drawing beats an hour of printing numbers.</p>
+
+<h2>Tool 4: randomised stress testing</h2>
+
+<p>You only test the inputs you think of. A <b>fuzzer</b> tests the ones you don't: it runs the simulation headless
+(no drawing, as fast as possible) many times, each with random settings and a random input program, applies the
+watchdog, and counts failures by kind. The demo's fuzzer picks the substep count from 1, 2, 4 and 8, the iteration
+count from 2 to 20, a box stiffness between 316 and 100,000 N/m, a weight between 1 and 1000 bead masses, and one
+random mouse drag per run, and runs each for 300 frames. 200 runs take about a second and a half.</p>
+
+<p>The table it prints shows energy and NaN failures by substep count and stiffness. Read it against the prediction
+$k_\text{crit} = m/h^2 = 0.2\,(60\,n)^2$ for $n$ substeps: 720 N/m for one substep, 2880 for two, 11,520 for four,
+46,080 for eight. With the demo's seed, every cell wholly above the boundary fails in every run, every cell wholly
+below it passes, and the cells the boundary cuts through fail partly. The fuzzer has measured the stability limit of
+the box. It also finds a second family of failures (stretch, from heavy weights with few iterations) that the
+stiffness analysis says nothing about.</p>
+
+<p>Look closely at the edges, too. One run at 2840 N/m with two substeps fails although it sits just below the 2880 N/m
+boundary ($h\omega = 1.986$). The limit $h\omega = 2$ comes from a linear analysis of a free box; with ground contact,
+large rotations and a 10 kg weight swinging nearby, the real limit is a little lower. Stability limits are not knife
+edges, which is why a design rule should keep well inside them. And treat every surprise in a fuzz table as a
+question: it may be a real failure near a limit, or a false alarm from a monitor whose tolerance is too tight for some
+honest motion. The fuzzer is how you find both.</p>
+
+<p>The workflow is a loop: fuzz, take the largest category of failures, replay one, find and fix its cause, and fuzz
+again <i>with the same seeds</i> so the comparison is fair. A fix that moves failures from one category to another is
+not a fix.</p>
+
+<h2>Fixing causes, not symptoms</h2>
+
+<p>The tempting fix for an explosion is a clamp: limit every velocity to 50 m/s, and nothing can fly off. It works, in
+the sense that the screen stops showing the problem. The stiff box still has an unstable mode; it now vibrates at the
+speed limit instead of flying apart, quietly turning the clamp into an energy source and the box into a buzzing
+mess. Clamps hide bugs from you and from your monitors.</p>
+
+<p>Some limits are honest, though. A limit is honest when it models something real, or when it is a deliberate,
+documented design decision, and when you count how often it fires:</p>
+
+<ul>
+<li><b>A separation speed limit</b> for depenetration ("overlapping bodies separate at no more than 1 m/s") is a design
+choice: it accepts a few frames of visible overlap in exchange for never injecting energy. Many engines do this by
+moving positions apart without letting the correction count as velocity.</li>
+<li><b>An actuator rate limit</b>, like the activation time constant of the <a href="19-active-materials.html">muscles
+chapter</a>, models how fast a real motor or muscle can change its command.</li>
+<li><b>A physical speed</b>, like the terminal velocity of a falling leaf, belongs in the model as drag, not as a
+clamp.</li>
+</ul>
+
+<p>A clamp on the result of the solver is a different thing: a statement that you do not know why it misbehaves. Find
+out.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>write the watchdog</h4>
+<p>Open the starter (<a href="../code/run.html?src=31-stability/starter.js" target="_blank">run it</a>,
+<a href="../code/31-stability/starter.js" target="_blank">read it</a>). Planting a cause makes the scene explode, and
+nothing notices. Implement <code>findNonFinite</code> and <code>checkFrame</code> (NaN, then energy, then constraint
+error). Test each named cause: you should get an energy jump for stiff springs, tiny mass, overlapping balls, deep
+penetration and Jacobi; a stretch for the heavy weight; and a NaN after the spring forces for coincident corners. Then
+drag things around for a minute without planting anything and make sure it never trips.</p>
+</div>
+
+<details class="hint"><summary>Hint: false alarms</summary>
+<p>If it trips while you drag, you forgot the <code>external</code> flag. If it trips when a ball lands, your
+tolerance is too tight or you measured <code>before</code> before applying the frame's events (planting a cause
+changes the energy, and that change is not the simulation's fault).</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>The two functions are in <a href="../code/31-stability/solution.js" target="_blank">solution.js</a>; their cores
+are the listings in "Tool 1" above, plus a NaN branch that turns <code>S.firstNaN</code> into a report and a stretch
+branch that compares <code>maxChainError(S).e</code> with 2 cm.</p>
+</details>
+
+<div class="exercise">
+<h4>three mysteries</h4>
+<p>Reset, then press <i>mystery 1</i>. Using only the watchdog report, the diagnostics, the drawing options and the
+replay, find out what was changed. Write down the kind of failure, the frame, the body, and which cause from this
+chapter it belongs to. Then do the same for <i>mystery 2</i> and <i>mystery 3</i> (reset in between). Only then read
+the answers.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>Compare the diagnostics before and after planting. One mystery changes a number in the info box; one changes the
+chain in a way the constraint-error colours show; one is visible if you replay to the frame before the trip and step
+with velocities drawn.</p>
+</details>
+
+<details class="hint"><summary>Answers</summary>
+<p><b>Mystery 1</b>: the substep count drops from 4 to 1, so $h$ becomes 1/60 s and the box's $h\omega$ jumps from 0.83
+to 3.33 (time step against the fastest mode). The box blows up a few frames later. <b>Mystery 2</b>: a second, much
+shorter distance constraint (2 cm) is added between the last bead and the weight. It conflicts with the 8 cm link, the
+constraint count goes from 10 to 11, the last link turns red, and the fight yanks the weight and whips the chain
+(conflicting constraints). <b>Mystery 3</b>: a ball is moved into a box corner, 5 cm deep, and the overlap is resolved
+in one substep (a bad state, the same mechanism as a deep collision).</p>
+</details>
+
+<div class="exercise">
+<h4>fuzz it</h4>
+<p>Complete the inner loop of <code>runFuzzer</code> and press <i>run fuzzer</i>. Before reading the table, predict
+for each substep count the box stiffness above which every run should fail, from $k_\text{crit} = m/h^2$. Then check
+the table: are the fully failing cells where you predicted? Which failures does your prediction not explain, and which
+setting do they correlate with? Finally, fix one cause (for example, cap the box stiffness at $0.5\,m/h^2$ given the
+substep count, a deliberate limit) and fuzz again with the same seed.</p>
+</div>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">for (let f = 0; f &lt; frames &amp;&amp; kind === 'ok'; f++) {
+  const input = program(f);
+  const before = energy(S);
+  stepScene(S, input);
+  const rep = checkFrame(S, before, energy(S), S.grab &gt;= 0);
+  if (rep) kind = rep.kind;
+}</code></pre>
+<p>The boundaries are 720, 2880, 11,520 and 46,080 N/m for 1, 2, 4 and 8 substeps. With seed 12345 the table shows
+every run failing in the columns wholly above them, none in the columns wholly below, and a fraction in the columns
+the boundary cuts (including the near-boundary run described above). The remaining failures are stretches, and they
+come from heavy weights with few iterations.</p>
+</details>
+
+<h2>Summary</h2>
+<ul>
+<li>An explosion is energy from nowhere. Recognise its signature: steady <b>growth</b> (an unstable mode), a one-frame
+<b>jump</b> (an injection), or <b>NaN</b> (an invalid operation that then spreads).</li>
+<li>The usual causes: $h\omega$ above the limit; mass and stiffness ratios; conflicting or redundant constraints (Jacobi
+without averaging); overlapping starts; deep penetrations resolved in one step ($v = d/h$); division by small numbers;
+NaN propagation.</li>
+<li>Monitor non-finite numbers after every phase, energy against a tolerance (excluding external work), and constraint
+errors. Stop at the first bad frame and blame the particle whose speed rose most.</li>
+<li>Make the simulation deterministic, record its inputs, replay to the frame before the failure, and reduce it to a
+minimal reproduction.</li>
+<li>Fuzz with random settings and inputs, count failures by kind, fix the largest category, and re-run with the same
+seeds.</li>
+<li>Fix causes. A clamp is honest only when it models something or is a documented design decision whose firing you
+count.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Name the three signatures of a failing simulation and one cause of each.</li>
+<li>A box of four 0.5 kg corners with springs of 50,000 N/m runs at 60 frames per second. How many substeps does it
+need for $h\omega_\text{max} \le 2$?</li>
+<li>Why does a NaN check that runs only at the end of each frame often blame the wrong particle?</li>
+<li>Your replay of a recorded failure does not reproduce it. List three things that could make the simulation
+non-deterministic.</li>
+<li>When is a velocity limit an honest fix?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

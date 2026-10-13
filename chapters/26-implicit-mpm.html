@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implicit MPM · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="26-implicit-mpm" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Implicit MPM</h1>
+<p class="subtitle">Ask the end of the step: backward Euler on the grid, solved as a minimisation with Newton's method, conjugate gradients and a line search.</p>
+
+<p>Explicit MPM has a speed limit, and you found it in the last two chapters: the time step must stay below about
+$\Delta x / c$, where $c$ is the speed of sound in the material. A jelly with a Young's modulus of 1 MPa has $c$ = 36.7
+m/s, so on our 64-cell grid each step can be at most 0.43 ms, which means 39 steps for every frame you draw. Make the
+jelly ten times stiffer and you need three times as many.</p>
+
+<p>The <a href="03-time-integration.html">time integration</a> chapter offered a way out for a single spring:
+implicit Euler, which evaluates the force at the end of the step and is stable for any $h$. This chapter does the
+same for MPM. The unknown is now every grid velocity at once, coupled through every particle, so "solve for the end
+of the step" becomes a nonlinear system with thousands of unknowns. You will solve it the way modern MPM codes do: as
+a minimisation, with Newton's method, a conjugate gradient solver that never builds a matrix, and a line search that
+guarantees progress.</p>
+
+<p>By the end you will be able to write backward Euler MPM, implement matrix-free CG and a Newton loop with a
+backtracking line search, explain why the stiffness matrix can stop being positive definite and what to do about it,
+judge when implicit is worth its cost, and read section 11 of the MPM course notes.</p>
+
+<h2>Backward Euler on the grid</h2>
+
+<p>Recall the explicit grid update of chapter 24, written with the force at the current configuration:</p>
+
+$$m_i\big(v_i^{n+1} - v_i^n\big) = h\,f_i(x^n) + h\,m_i\,g.$$
+
+<p>Backward Euler asks for the force at the end of the step instead. The grid does not really move, but in chapter
+24's energy derivation we imagined it moving, node $i$ to $\hat x_i = x_i + h\,v_i$, and every particle's
+deformation gradient following it. Evaluate the force at the positions the new velocities would produce:</p>
+
+$$m_i\big(v_i^{n+1} - v_i^n\big) = h\,f_i\big(\hat x(v^{n+1})\big) + h\,m_i\,g, \qquad \hat x_i = x_i + h\,v_i^{n+1}.$$
+
+<p>Everything we need was built in chapter 24. With the shorthand $q_{ip} = \mathbf F_p^T \nabla w_{ip}$ (a vector per
+particle and node, fixed during the step), the deformation gradient the step would produce and the force it would
+cause are</p>
+
+$$\hat{\mathbf F}_p(v) = \mathbf F_p + h\sum_j v_j\,q_{jp}^T, \qquad f_i(v) = -\sum_p V_p^0\,\mathbf P\big(\hat{\mathbf
+F}_p(v)\big)\,q_{ip}.$$
+
+<p>The first is $(\mathbf I + h\nabla v_p)\mathbf F_p$ written out; the second is chapter 24's force with
+$\hat{\mathbf F}_p$ in place of $\mathbf F_p$. The catch is the usual one: $v^{n+1}$ appears on both sides, inside a
+nonlinear stress, and through the particles every node is coupled to its neighbours. For the demo's beam of 900
+particles that is a system of about 600 coupled nonlinear equations (two per active grid node) every step.</p>
+
+<div class="demo" data-src="26-implicit-mpm/solution.js" data-height="560"
+     data-caption="Implicit MPM at one 16.7 ms step per frame. The cantilever's tip deflection is compared with beam theory. Switch the method to explicit to see what happens at the same step, or press kick."></div>
+
+<p>The demo runs a stiff jelly beam, clamped in the left wall, at <i>one</i> step per frame: $h$ = 16.7 ms, so
+$hc/\Delta x = 39$, far beyond anything explicit MPM survives. Switch to explicit and it explodes on the first frame.
+Switch to the jelly drop and watch two blocks land; the readouts show how hard the solver works for each step.</p>
+
+<h2>A minimisation in disguise</h2>
+
+<p>Gast and colleagues (<i>Optimization Integrator for Large Time Steps</i>, 2015) observed that this system is the
+condition for the minimum of a scalar function. Let $v^* = v^n + h g$ be the velocity the grid would have with gravity
+alone, and define the <b>incremental potential</b></p>
+
+$$E(v) = \sum_i \tfrac12\,m_i\,\big|v_i - v_i^*\big|^2 \;+\; \Phi\big(\hat x(v)\big), \qquad \Phi = \sum_p
+V_p^0\,\Psi\big(\hat{\mathbf F}_p(v)\big).$$
+
+<p>Its gradient is</p>
+
+$$\frac{\partial E}{\partial v_i} = m_i\,(v_i - v_i^*) + h\,\frac{\partial\Phi}{\partial\hat x_i} = m_i\,(v_i - v_i^*) -
+h\,f_i(v),$$
+
+<p>because $\partial\hat x_i/\partial v_i = h$ and the force is minus the gradient of the elastic energy (chapter 24).
+Setting it to zero gives back exactly the backward Euler update. So <b>one implicit step is one minimisation</b>: find
+the velocities that best balance staying close to $v^*$ (the kinetic term, inertia) against relaxing the elastic
+energy at the end of the step.</p>
+
+<p>This is the same idea as the energy view of XPBD in the <a href="07-xpbd.html">compliance</a> chapter, and it buys
+three things. The problem has a natural measure of progress: $E$ must go down, so a bad step can be detected and
+shortened. The Hessian, the matrix of second derivatives, is symmetric, so we can use conjugate gradients. And as long
+as every step lowers $E$, the solver cannot blow up, whatever the time step: the energy is bounded below.</p>
+
+<div class="note">
+<p><b>Units check.</b> $E$ has units of energy (J per metre of depth in 2D): $m_i |v|^2$ is kinetic energy and $\Phi$
+is elastic energy. Dividing the gradient by $m_i$ gives a velocity error, $v_i - v_i^* - h f_i/m_i$, which is how
+the demo measures convergence: the readout "residual" is the mass-weighted RMS of that error, in m/s, and Newton stops
+below $10^{-3}$ m/s.</p>
+</div>
+
+<h2>Newton's method</h2>
+
+<p>Newton's method replaces $E$ near the current guess $v$ by its quadratic Taylor model and jumps to the model's
+minimum:</p>
+
+$$E(v + d) \approx E(v) + g^T d + \tfrac12\,d^T \mathbf H\,d \quad\Longrightarrow\quad \mathbf H\,d = -g,$$
+
+<p>where $g$ is the gradient and $\mathbf H$ the Hessian of $E$:</p>
+
+$$\mathbf H = \mathbf M + h^2\,\mathbf K, \qquad \mathbf K = \frac{\partial^2\Phi}{\partial\hat x\,\partial\hat x}.$$
+
+<p>$\mathbf M$ is the diagonal matrix of node masses and $\mathbf K$ is the <b>stiffness matrix</b>, the derivative of
+minus the forces with respect to node positions. The $h^2$ is the whole story of implicit integration in one symbol: for
+a small step the mass dominates and $\mathbf H$ is easy, for a large step the stiffness dominates and $\mathbf H$
+becomes as hard to invert as the elastic problem itself.</p>
+
+<p>Start from $v = v^*$ (no elastic forces), solve for $d$, update $v \leftarrow v + d$, repeat. Near the solution
+Newton converges quadratically: the number of correct digits roughly doubles every iteration. In the cantilever, the
+residual goes 7.8, 0.25, 0.0003, 0.0000003 m/s in three iterations. Two are enough for our tolerance.</p>
+
+<h2>Hessian-vector products without a matrix</h2>
+
+<p>We never build $\mathbf H$. A thousand unknowns would make a matrix of a million entries, most of them zero, and in
+3D MPM codes the unknowns run into millions. What we can do cheaply is multiply $\mathbf H$ by a vector $u$, and that
+turns out to be all a conjugate gradient solver needs.</p>
+
+<p>Think of $u$ as a small change of the grid velocities. It changes every particle's deformation gradient by</p>
+
+$$\delta\mathbf F_p = \sum_j u_j\, q_{jp}^T,$$
+
+<p>which is a G2P-like gather. That changes the particle's stress by $\delta\mathbf P_p = \frac{\partial\mathbf
+P}{\partial\mathbf F}(\hat{\mathbf F}_p) : \delta\mathbf F_p$, the derivative of the stress in the direction
+$\delta\mathbf F_p$. And that changes the forces by a P2G-like scatter. Putting the $h$ factors in,</p>
+
+$$(\mathbf H u)_i = m_i\,u_i \;+\; h^2\sum_p V_p^0\;\delta\mathbf P_p\;q_{ip}.$$
+
+<p>One Hessian-vector product costs one gather and one scatter over the particles, about the cost of one explicit
+step. For fixed corotated, the stress differential follows from $\mathbf P = 2\mu(\mathbf F - \mathbf R) + \lambda(J-1)
+\operatorname{cof}\mathbf F$, with $\operatorname{cof}\mathbf F = J\mathbf F^{-T}$:</p>
+
+$$\delta\mathbf P = 2\mu\,(\delta\mathbf F - \delta\mathbf R) + \lambda\,(\operatorname{cof}\mathbf F : \delta\mathbf F)\,
+\operatorname{cof}\mathbf F + \lambda\,(J - 1)\,\operatorname{cof}(\delta\mathbf F).$$
+
+<p>Two pieces need a moment's thought. In 2D, $\operatorname{cof}\mathbf F$ is linear in the entries of $\mathbf F$, so
+its differential is $\operatorname{cof}(\delta\mathbf F)$, and $\operatorname{cof}\mathbf F : \delta\mathbf F$ is the
+change of $J$. The rotation is the hard part in 3D, but in 2D $\mathbf R$ is the rotation by
+$\theta = \operatorname{atan2}(b, a)$ with $a = F_{00} + F_{11}$, $b = F_{10} - F_{01}$, so</p>
+
+$$\delta\theta = \frac{a\,\delta b - b\,\delta a}{a^2 + b^2}, \qquad \delta\mathbf R = \delta\theta\begin{pmatrix} -s &
+-c \\ c & -s\end{pmatrix}.$$
+
+<pre><code class="language-js">function hessVec(u, out) {
+  out.fill(0);                                           // out = M u on the free degrees of freedom
+  for (let f = 0; f &lt; nFree; f++) { const i = freeList[f]; out[i] = gm[i >> 1] * u[i]; }
+  for (let p = 0; p &lt; count; p++) {
+    let d00 = 0, d01 = 0, d10 = 0, d11 = 0;              // dF = sum_j u_j q_j^T   (gather)
+    for (let k = 9 * p; k &lt; 9 * p + 9; k++) {
+      const i = 2 * sNode[k];
+      d00 += u[i] * sQx[k]; d01 += u[i] * sQy[k]; d10 += u[i + 1] * sQx[k]; d11 += u[i + 1] * sQy[k];
+    }
+    stressDifferential(/* F_hat, R */ ..., d00, d01, d10, d11, mu, la, P);   // dP
+    const V = pV0[p] * h * h;
+    for (let k = 9 * p; k &lt; 9 * p + 9; k++) {             // out += h^2 V dP q   (scatter)
+      const i = 2 * sNode[k];
+      out[i] += V * (P[0] * sQx[k] + P[1] * sQy[k]);
+      out[i + 1] += V * (P[2] * sQx[k] + P[3] * sQy[k]);
+    }
+  }
+}</code></pre>
+
+<div class="warning">
+<p><b>Test the derivative before you trust it.</b> A wrong sign in $\delta\mathbf P$ does not crash anything; Newton
+just converges slowly or not at all. Compare $\mathbf H u$ with the central difference $\big(g(v + \epsilon u) -
+g(v - \epsilon u)\big)/(2\epsilon)$ for random $v$ and $u$, on the free degrees of freedom only. For the demo's
+<code>hessVec</code>, with $\epsilon = 10^{-5}$, the two agree to a relative error of $2\times10^{-11}$, in both
+scenes, mid-motion. Do the same for the gradient against the energy.</p>
+</div>
+
+<h2>Conjugate gradients</h2>
+
+<p>The linear system $\mathbf H d = -g$ is solved with the <b>conjugate gradient</b> method (CG), which you met in the
+<a href="09-linear-solvers.html">linear solvers</a> chapter. It is the right tool because it needs only products
+$\mathbf H p$, and it is guaranteed to work when $\mathbf H$ is symmetric positive definite. Each iteration minimises
+the quadratic model over one more search direction, chosen so that it does not undo the progress of the previous
+ones.</p>
+
+<pre><code class="language-js">// Preconditioned CG for H x = b (x starts at 0). z = r / diagH is the Jacobi preconditioner.
+r = b;  z = r / diagH;  p = z;  rz = r . z
+repeat:
+  Ap = H p;  pAp = p . Ap
+  if (pAp &lt;= 0) stop                      // negative curvature: see below
+  alpha = rz / pAp
+  x += alpha p;  r -= alpha Ap
+  if (|r| &lt; relTol |b|) stop
+  z = r / diagH;  rzNew = r . z
+  p = z + (rzNew / rz) p;  rz = rzNew</code></pre>
+
+<p>The <b>preconditioner</b> matters more in MPM than almost anywhere. Node masses vary enormously: a node deep inside
+the material has the full mass of its neighbourhood, a node at the surface may receive one percent of it. Plain CG
+treats all unknowns alike and crawls. Dividing the residual by the diagonal of $\mathbf H$, which the code approximates
+as $m_i$ plus $h^2$ times the diagonal of a linear-elastic stiffness, puts every node on an equal footing at the cost
+of one division.</p>
+
+<p>How many iterations? CG's convergence depends on the condition number of the (preconditioned) matrix, roughly
+iterations $\propto \sqrt{\kappa}$. For $\mathbf M + h^2\mathbf K$, the stiffest mode against the mass gives $\kappa
+\sim (hc/\Delta x)^2$, so you should expect iteration counts proportional to $hc/\Delta x$, that is, to $h\sqrt E$. Once
+$h^2\mathbf K$ dominates $\mathbf M$ completely, the count stops growing: the matrix is then essentially $h^2\mathbf K$,
+whose condition number depends on the shape of the body and the grid, not on $E$. Exercise 4 measures both regimes.</p>
+
+<h2>When the Hessian is not positive definite</h2>
+
+<p>CG assumes $\mathbf H$ is positive definite: $u^T\mathbf H u &gt; 0$ for every direction $u$, so that the quadratic
+model has a minimum. The mass part always is. The stiffness part need not be. A material's energy is convex near its
+rest shape, but fixed corotated is not convex everywhere: under strong compression the $\lambda(J-1)\operatorname{cof}
+(\delta\mathbf F)$ term contributes negative curvature, and so does the rotation term when $\mathbf F$ is far from a
+rotation. Physically, the material is in a state where pushing harder makes it give way, like a column buckling.
+Mathematically, the quadratic model has no minimum in some direction, and Newton's step can point uphill.</p>
+
+<p>There are three standard defences, and robust codes use more than one:</p>
+
+<ul>
+<li><b>Stop CG at negative curvature.</b> If CG meets a direction with $p^T\mathbf H p \le 0$, it stops and returns
+what it has so far (or, on the first iteration, the preconditioned steepest descent direction). Everything it returns
+is then a descent direction. This "truncated CG" is what our <code>cg</code> does, and it costs nothing.</li>
+<li><b>Make each particle's Hessian positive definite.</b> $\mathbf K$ is a sum of per-particle contributions. Smith,
+De Goes and Kim (<i>Analytic Eigensystems for Isotropic Distortion Energies</i>, 2019) give the eigenvalues and
+eigenvectors of $\partial^2\Psi/\partial\mathbf F^2$ in closed form for isotropic energies, so each negative eigenvalue
+can be clamped to zero before the contributions are summed. The projected Hessian is positive definite by
+construction.</li>
+<li><b>Check the step with the energy.</b> The line search below rejects any step that does not lower $E$ enough,
+whatever produced it.</li>
+</ul>
+
+<div class="paper">
+<h4>why PB-MPM's introduction mentions this</h4>
+<p>The PB-MPM paper motivates itself with exactly this section: implicit integration via Newton allows large steps, it
+says, but it is complex to implement and has its own stability pitfalls, such as needing a positive definite stiffness
+matrix, citing Smith et al. 2019. Now you know what that sentence means, and why a method with no Hessian at all is
+attractive for games. The <a href="27-pbmpm.html">next chapter</a> builds it.</p>
+</div>
+
+<h2>A line search makes Newton safe</h2>
+
+<p>Even with a good direction, the full Newton step can be too long. The quadratic model is only accurate near the
+current guess, and at the moment two stiff blocks collide the true energy is far from quadratic. The fix is to treat
+$d$ as a direction and choose how far to go. <b>Backtracking</b> starts with the full step $\alpha = 1$ and halves it
+until the energy has decreased enough:</p>
+
+$$E(v + \alpha d) \;\le\; E(v) + c\,\alpha\,g^T d, \qquad c = 10^{-4}.$$
+
+<p>This is the <b>Armijo condition</b>: the decrease must be at least a small fraction of what the linear model
+predicts. Since $g^T d &lt; 0$ for a descent direction, a small enough $\alpha$ always satisfies it. Each test costs one
+energy evaluation, a gather over the particles, which is cheap next to the CG solve.</p>
+
+<pre><code class="language-js">let alpha = 1;
+for (let ls = 0; ls &lt; 30; ls++) {
+  for (let i = 0; i &lt; NDOF; i++) vTry[i] = vel[i] + alpha * dir[i];
+  if (energy(vTry) &lt;= E0 + 1e-4 * alpha * gd) break;
+  alpha *= 0.5;
+}
+vel.set(vTry);</code></pre>
+
+<p>How much does it matter? In the cantilever, never: the full step is always accepted. In the jelly drop at the
+demo's settings, one Newton step from $v^*$ without a line search sends particles flying at 40,000 m/s the moment the
+blocks land, while Newton with the line search needs up to a dozen halvings in the steps around impact and stays
+calm. At $E$ = 10 MPa and $h$ = 33 ms, full Newton steps without the line search explode; with it, the drop is
+stable, at the price of about three halvings per step.</p>
+
+<div class="paper">
+<h4>section 11 of the MPM course notes</h4>
+<p>Section 11 builds implicit MPM in the order of this chapter. Section 11.1, <i>Force Derivative</i>, writes the
+energy as a function of moved node positions (equations 191 to 193, our $\Phi$ and $\hat{\mathbf F}_p$), the force
+(194, with the Cauchy form 195), and the action of the Hessian on an increment $u$ (196 and 197, our <code>hessVec</code>;
+their $\mathbf A_p$ is our $\delta\mathbf P_p$, and $\sum_j u_j (\nabla w_{jp})^T\mathbf F_p$ is our $\delta\mathbf
+F_p$). The stress differential for fixed corotated is in section 6.4, equations (53) to (56). Section 11.2 states the
+backward Euler update (199) and the nonlinear system $\mathbf M v - h f(x^n + hv) - \mathbf M v^n = 0$ (200). Section
+11.3 applies Newton (201) and suggests a Krylov solver such as MINRES; note that MINRES, unlike CG, tolerates
+symmetric <i>indefinite</i> matrices, which is another answer to the definiteness problem. Section 11.4 linearises
+around zero grid motion, (202) and (203), and remarks that this equals a single Newton step from $v = 0$: the demo's
+"semi-implicit" option. Section 11.5 recasts the system as the minimisation (204) and (205), our $E(v)$ with gravity
+folded into $v^*$, and refers to Gast et al. 2015 for how to implement it. The notes also make the point we
+demonstrated: plain Newton still needs fairly small steps in practice, while the minimisation form lets Newton converge
+reliably at much larger ones.</p>
+</div>
+
+<h2>Explicit, semi-implicit, implicit</h2>
+
+<p>The demo has three update rules for the same grid problem, and comparing them is the best way to see what you are
+paying for.</p>
+
+<table>
+<tr><th>Method</th><th>What it solves</th><th>Cantilever, $h$ = 16.7 ms</th></tr>
+<tr><td>explicit</td><td>$v = v^* + h f(x^n)/m$</td><td>explodes at once (stable only below $h$ = 0.43 ms, measured;
+$\Delta x/c$ = 0.426 ms)</td></tr>
+<tr><td>semi-implicit</td><td>one linear solve, linearised at $v = 0$ (course 11.4)</td><td>stable; while the beam
+moves the residual is about $10^{-2}$ m/s, so the step is not quite the backward Euler answer</td></tr>
+<tr><td>implicit</td><td>Newton with line search to a residual of $10^{-3}$ m/s</td><td>stable; 2 to 3 Newton
+iterations, 100 to 300 CG iterations per step</td></tr>
+</table>
+
+<p>The implicit beam also gives two checks against closed forms. First, statics. Euler-Bernoulli beam theory for a
+cantilever of length $L$ and thickness $t$ under its own weight, in plane strain ($E' = E/(1-\nu^2)$), predicts a tip
+deflection $\delta = \frac{3\rho g L^4}{2E't^2}$ = 8.37 cm for the demo's $L$ = 0.5 m, $t$ = 0.1 m, $E$ = 1 MPa, plus
+about 0.38 cm of shear deflection for so thick a beam: 8.75 cm. The simulation settles at 10.4 cm. Is that an error in
+the solver or in the discretisation? Rerunning the same beam on grids of 32, 64 and 128 cells gives 13.7, 10.4 and
+9.3 cm: the error shrinks about threefold for each halving of $\Delta x$, and extrapolating gives 8.7 cm. So the solver
+is right, and the beam, with only six cells through its thickness, is a little too soft at this resolution.</p>
+
+<p>Second, dynamics. Press <b>kick</b> and the beam oscillates with a period of 0.52 s (beam theory says 0.47 s for the
+stiffer continuum beam; the 25 % extra softness predicts $0.47\times\sqrt{1.25}$ = 0.52 s). The oscillation dies out,
+and how fast depends on $h$, exactly as chapter 03 predicted for implicit Euler: each step multiplies the amplitude by
+$1/\sqrt{1 + h^2\omega^2}$. With $\omega = 2\pi/0.52$ s = 12.2 rad/s, that is a factor 0.53 per period at $h$ = 16.7 ms
+and 0.93 at $h$ = 2 ms. We measured 0.47 and 0.85: the predicted numerical damping, plus a further 8 % per period, at
+any step size, from MPM's transfers. Large implicit steps are stable <i>because</i> they damp, and the damping is
+visible.</p>
+
+<h2>What it costs</h2>
+
+<p>Count the work in particle passes (one gather or scatter over all particles). Explicit MPM at its limit of 0.43 ms
+needs 39 steps per frame, two passes each: about 80 passes. Implicit at one step per frame needs two or three Newton
+iterations, each with a gradient pass, a line search pass or two and 100 to 140 CG iterations of two passes each:
+about 500 passes. On this scene, with a Jacobi preconditioner, <b>implicit is several times slower than
+explicit</b>.</p>
+
+<p>That is not a failure of the method; it is the honest trade-off. Implicit pays off when the material is so stiff
+that explicit would need hundreds of steps per frame while CG's iteration count has saturated (exercise 4), when a
+better preconditioner keeps CG's count low (multigrid methods are the usual choice; Wang et al., <i>Hierarchical
+Optimization Time Integration for CFL-rate MPM Stepping</i>, 2020, is a good example), and whenever robustness at a
+fixed large step matters more than raw speed. It also costs implementation effort: second derivatives of every
+material model, a careful treatment of definiteness, and a solver that must converge every step.</p>
+
+<p>For real-time work, none of those are attractive. A game wants a fixed, small cost per step and no possibility of
+failure. The next chapter's method keeps the large stable step but drops the Hessian, the linear solve and the line
+search: it trades accuracy (softness when it has not converged) for a cost of roughly one explicit step per
+iteration.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>make the starter work: conjugate gradients</h4>
+<p>Open the starter (<a href="../code/run.html?src=26-implicit-mpm/starter.js" target="_blank">run it</a>,
+<a href="../code/26-implicit-mpm/starter.js" target="_blank">read it</a>). The energy, its gradient and the
+Hessian-vector product are written; <code>cg</code> returns zero, so no elastic force ever acts and the beam falls
+off the wall. Implement the preconditioned CG of this chapter in <code>cg</code>, working only on the free degrees of
+freedom (<code>freeList</code>). The starter's <code>newtonSolve</code> takes one unguarded Newton step from $v^*$.
+When CG works, the cantilever should bend and settle at about 10.5 cm, close to the solution's 10.4 cm, although the
+residual readout shows that one Newton step leaves the equations far from solved. Then try the jelly drop. What
+happens when the blocks land?</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>Keep <code>cgP</code> zero outside the free entries (the starter clears it): <code>hessVec</code> gathers from every
+node in each particle's stencil, and garbage in a fixed entry would leak into the free ones. Count iterations so you
+can return them; the readout adds them up.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Compare with <a href="../code/26-implicit-mpm/solution.js" target="_blank">solution.js</a>:</p>
+<pre><code class="language-js">function cg(b, x, maxIter, relTol) {
+  x.fill(0); cgP.fill(0);
+  for (let f = 0; f &lt; nFree; f++) {
+    const i = freeList[f];
+    cgR[i] = b[i]; cgZ[i] = cgR[i] / diagH[i]; cgP[i] = cgZ[i];
+  }
+  let rz = dot(cgR, cgZ);
+  const stop = relTol * relTol * dot(b, b);
+  let k = 0;
+  for (; k &lt; maxIter; k++) {
+    hessVec(cgP, cgAp);
+    const pAp = dot(cgP, cgAp);
+    if (pAp &lt;= 0) {
+      if (k === 0) for (let f = 0; f &lt; nFree; f++) x[freeList[f]] = cgZ[freeList[f]];
+      break;
+    }
+    const alpha = rz / pAp;
+    for (let f = 0; f &lt; nFree; f++) { const i = freeList[f]; x[i] += alpha * cgP[i]; cgR[i] -= alpha * cgAp[i]; }
+    if (dot(cgR, cgR) &lt; stop) { k++; break; }
+    for (let f = 0; f &lt; nFree; f++) { const i = freeList[f]; cgZ[i] = cgR[i] / diagH[i]; }
+    const rzNew = dot(cgR, cgZ), beta = rzNew / rz;
+    rz = rzNew;
+    for (let f = 0; f &lt; nFree; f++) { const i = freeList[f]; cgP[i] = cgZ[i] + beta * cgP[i]; }
+  }
+  return k;
+}</code></pre>
+<p>With CG alone, the jelly drop explodes on impact: a single full Newton step from $v^*$ is far too long once the
+blocks touch the floor. That is the next exercise.</p>
+</details>
+
+<div class="exercise">
+<h4>Newton with a line search</h4>
+<p>Replace the single step in <code>newtonSolve</code> by Newton's method: up to <code>maxNewton</code> iterations,
+stopping when the residual is below <code>NEWTON_TOL</code>, each computing a CG direction and a backtracking line
+search on <code>energy</code>. The jelly drop should now land calmly. Watch the "line search halvings" readout at the
+moment of impact. Then, as an experiment, make <code>energy</code> always return <code>-Infinity</code> so that every
+full step is accepted, and confirm that the drop explodes again.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>Compute $E_0$ and $g$ together with <code>energyAndGradient</code>; it also caches $\hat{\mathbf F}_p$ for
+<code>hessVec</code>, so call it at the start of every Newton iteration, not <code>energy</code>. If $g^T d$ is not
+negative (CG returned something odd), fall back to $d = -g/\text{diagH}$.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">function newtonSolve() {
+  for (let i = 0; i &lt; NDOF; i++) vel[i] = vStar[i] * free[i];
+  for (let it = 0; it &lt; maxNewton.value; it++) {
+    const E0 = energyAndGradient(vel, grad);
+    stats.residual = residualNorm(grad);
+    if (stats.residual &lt; NEWTON_TOL) break;
+    stats.newton++;
+    for (let i = 0; i &lt; NDOF; i++) vTry[i] = -grad[i];
+    stats.cg += cg(vTry, dir, maxCG.value, 1e-3);
+    let gd = dot(grad, dir);
+    if (!(gd &lt; 0)) {
+      for (let i = 0; i &lt; NDOF; i++) dir[i] = free[i] ? -grad[i] / diagH[i] : 0;
+      gd = dot(grad, dir);
+    }
+    let alpha = 1;
+    for (let ls = 0; ls &lt; 30; ls++) {
+      for (let i = 0; i &lt; NDOF; i++) vTry[i] = vel[i] + alpha * dir[i];
+      if (energy(vTry) &lt;= E0 + 1e-4 * alpha * gd) break;
+      alpha *= 0.5;
+      stats.halvings++;
+    }
+    vel.set(vTry);
+  }
+  energyAndGradient(vel, grad);
+  stats.residual = residualNorm(grad);
+}</code></pre>
+</details>
+
+<div class="exercise">
+<h4>explicit against implicit at a large step</h4>
+<p>On the cantilever, switch the method to explicit at $h$ = 16.7 ms and watch it fail. Using chapter 24, predict the
+largest explicit step for $E$ = 1 MPa, then find it with the slider (press R after each change). Now go back to
+implicit, press <b>kick</b>, and count how many periods the oscillation lasts at $h$ = 16.7 ms and at $h$ = 2 ms.
+Predict the amplitude ratio per period for both from chapter 03's damping factor before you look, and explain the
+difference between prediction and measurement.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>$c = \sqrt{(\lambda + 2\mu)/\rho}$ = 36.7 m/s, so $\Delta x/c$ = 0.43 ms; the demo is stable up to about the same
+value. For the damping, use $\omega = 2\pi/T$ with the measured period $T \approx$ 0.52 s, and raise
+$1/\sqrt{1 + h^2\omega^2}$ to the number of steps per period, $T/h$.</p>
+</details>
+
+<div class="exercise">
+<h4>count CG iterations against stiffness</h4>
+<p>On the jelly drop at $h$ = 16.7 ms, set the maximum CG iterations to 1000 so the solver is never cut short. For $E$
+= 10 kPa, 100 kPa, 1 MPa and 10 MPa, predict how the number of CG iterations per Newton iteration should scale, then
+record it once the blocks have come to rest (CG iterations divided by Newton iterations). Where does your prediction
+hold, and where does it break down, and why?</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>Expect iterations $\propto hc/\Delta x \propto \sqrt E$ while the mass still matters. We measured 21, 57, 136 and
+164 iterations: factors of 2.7 and 2.4 per decade (against $\sqrt{10} = 3.2$), then only 1.2 once $h^2\mathbf K$
+dominates $\mathbf M$ and the condition number no longer depends on $E$.</p>
+</details>
+
+<h2>Summary</h2>
+<ul>
+<li>Backward Euler MPM evaluates grid forces at the moved node positions $\hat x_i = x_i + h v_i^{n+1}$; with
+$q_{ip} = \mathbf F_p^T\nabla w_{ip}$, $\hat{\mathbf F}_p = \mathbf F_p + h\sum_j v_j q_{jp}^T$.</li>
+<li>The update is the minimum of the incremental potential $E(v) = \sum_i \frac12 m_i|v_i - v_i^*|^2 + \Phi(\hat x(v))$.
+Its gradient is $m(v - v^*) - hf$, its Hessian $\mathbf M + h^2\mathbf K$.</li>
+<li>Newton's method solves $\mathbf H d = -g$ with matrix-free preconditioned CG: a Hessian-vector product is a
+gather of $\delta\mathbf F_p$, a stress differential, and a scatter.</li>
+<li>The elastic Hessian can be indefinite. Truncate CG at negative curvature, project per-particle Hessians (Smith et
+al. 2019), and always check steps with a backtracking line search on $E$.</li>
+<li>Implicit steps are stable at any size but add numerical damping, and with a simple preconditioner they are not
+necessarily cheaper than explicit ones.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Show that the gradient of $E(v)$ vanishing is the backward Euler update. Where does gravity go?</li>
+<li>Why does CG need only Hessian-vector products, and what does one cost in MPM?</li>
+<li>Name two reasons the Newton direction can point uphill, and two remedies.</li>
+<li>A beam oscillates at $\omega$ = 20 rad/s. By what factor does implicit Euler shrink its amplitude per step at
+$h$ = 10 ms, and per second?</li>
+<li>Why did the CG iteration count stop growing between $E$ = 1 MPa and 10 MPa?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

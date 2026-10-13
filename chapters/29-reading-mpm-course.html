@@ -1,0 +1,785 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading: The MPM Course (2016) · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="29-reading-mpm-course" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Reading: The MPM Course (2016)</h1>
+<p class="subtitle">Fifty-two pages that take you from a flow map to a Newton solver, read with a pencil.</p>
+
+<p>The SIGGRAPH 2016 course notes on the Material Point Method are the closest thing the field has to a textbook
+chapter. They start from the definition of motion, build continuum mechanics, discretise it on a grid with particles,
+and end with explicit and implicit time stepping. They are the standard reference for graphics MPM, and the
+PB-MPM paper sends its readers there for "standard MPM techniques".</p>
+
+<p>They are also uneven. Some results are derived in loving detail; others appear in one line; a few sections are
+written for people who already know finite elements. This chapter walks through the notes in their own order. For each
+section you get what it says, what to read slowly and what to skim, the key equations restated in this site's
+notation, and full derivations where the notes are brief. Questions with hidden answers follow each major part.</p>
+
+<p>By the end you should be able to derive the MPM grid force from an energy, explain why the stress in the force
+formula is $\mathbf{P}\mathbf{F}^T$ and not $\mathbf{P}$, write the explicit algorithm from memory, and set up the
+Newton system for implicit MPM.</p>
+
+<div class="paper">
+<h4>the notes</h4>
+<p>Chenfanfu Jiang, Craig Schroeder, Joseph Teran, Alexey Stomakhin, Andrew Selle. <i>The Material Point Method for
+Simulating Continuum Materials.</i> SIGGRAPH 2016 Courses, Article 24, 52 pages. DOI
+<a href="https://doi.org/10.1145/2897826.2927348">10.1145/2897826.2927348</a>. Version 1, May 2016. The authors
+were at the University of California, Los Angeles, the University of California, Riverside, and Walt Disney Animation
+Studios.</p>
+</div>
+
+<h2>What the notes are, and where they sit</h2>
+
+<p>MPM began in computational mechanics: Sulsky, Chen and Schreyer (1994) and Sulsky, Zhou and Schreyer (1995)
+turned the 1960s Particle-In-Cell method into a method for solids, by letting each particle carry its own deformation
+history. Graphics met hybrid particle-grid methods through FLIP liquids (Zhu and Bridson, 2005), and MPM itself
+through Stomakhin et al.'s snow paper (2013), developed for feature-film production. A burst of follow-ups came from
+the same group: phase change (2014), APIC transfers (2015, <a href="28-reading-apic.html">chapter 28</a>), an
+optimisation-based implicit integrator (Gast et al., 2015), sand (Klár et al., 2016). The course gathers that work into
+one tutorial. Later developments the notes predate include MLS-MPM (2018) and PB-MPM (2024,
+<a href="30-reading-pbmpm.html">chapter 30</a>).</p>
+
+<p>The problem the notes solve is a teaching problem. MPM papers each assume the previous ones. The course lays out
+the whole chain in one place, from "what is a deformation" to "here is the linear system you solve".</p>
+
+<h2>Before you start</h2>
+
+<ul>
+<li><a href="20-deformation.html">20, The Deformation Gradient</a>: covers section 5 of the notes. Essential.</li>
+<li><a href="21-hyperelasticity.html">21, Stress and Hyperelasticity</a>: covers section 6. Essential.</li>
+<li><a href="22-pic-flip.html">22</a> and <a href="23-apic.html">23</a>: transfers, sections 8 and 10.1.</li>
+<li><a href="24-mpm.html">24, The Material Point Method</a>: the explicit algorithm of section 10. Essential.</li>
+<li><a href="25-plasticity.html">25, Plasticity</a>: section 6.5.</li>
+<li><a href="26-implicit-mpm.html">26, Implicit MPM</a>, with <a href="03-time-integration.html">03</a> and
+<a href="09-linear-solvers.html">09</a>: section 11.</li>
+<li><a href="15-contact-friction.html">15, Contact and Friction</a>: section 12.1.</li>
+</ul>
+
+<p><b>A reading plan.</b> First pass (an evening): sections 3, 5, 6.1 to 6.3, 7, 9 and 10. Second pass: section 11 and
+6.5. Skim 6.4 and 12 until you need them. Skip 1, 2 and 4 entirely: lecturer biographies, schedule, and a short
+non-technical section on production use.</p>
+
+<h2>Notation: their symbols, our symbols</h2>
+
+<p>The notes switch notation partway through and reuse several letters. This table will save you hours.</p>
+
+<table>
+<tr><th>Notes</th><th>This site</th><th>Meaning and warnings</th></tr>
+<tr><td>$\mathbf{X}$, $\mathbf{x}$, $\phi(\mathbf{X}, t)$</td><td>same</td><td>Material (rest) point, world point, deformation map. $\Omega^0$, $\Omega^t$ are the body at rest and at time $t$.</td></tr>
+<tr><td>$\mathbf{V}, \mathbf{A}$ versus $\mathbf{v}, \mathbf{a}$</td><td>same</td><td>Uppercase: Lagrangian (functions of $\mathbf{X}$). Lowercase: Eulerian (functions of $\mathbf{x}$).</td></tr>
+<tr><td>$\mathbf{F}$ and $\mathbf{f}$</td><td>$\mathbf{F}$</td><td>Deformation gradient, Lagrangian and pushed forward. Later $\mathbf{f}$ is also a force. Context decides.</td></tr>
+<tr><td>$R(\mathbf{X}, t)$</td><td>$\rho_0/J$ pulled back</td><td><b>Clash:</b> in section 7, $R$ is the Lagrangian mass density. In section 6, $\mathbf{R}$ is the polar rotation.</td></tr>
+<tr><td>$\boldsymbol\sigma$ and $\sigma_i$, $\boldsymbol\Sigma$</td><td>same</td><td><b>Clash:</b> bold $\boldsymbol\sigma$ is Cauchy stress; $\sigma_i$ are singular values of $\mathbf{F} = \mathbf{U}\boldsymbol\Sigma\mathbf{V}^T$.</td></tr>
+<tr><td>$\mathbf{P}$, $\boldsymbol\tau$, $\Psi$</td><td>same</td><td>First Piola-Kirchhoff stress, Kirchhoff stress, energy density.</td></tr>
+<tr><td>$\mu$, $\lambda$</td><td>$\mu$, Lamé $\lambda$</td><td>Lamé parameters, equation (47). Not a Lagrange multiplier.</td></tr>
+<tr><td>$h$ in (121) to (124)</td><td>$\Delta x$</td><td><b>Clash:</b> the notes use $h$ for the <i>grid spacing</i> in section 8.1 and write $\Delta x$ elsewhere.</td></tr>
+<tr><td>$\Delta t$</td><td>$h$</td><td>Time step.</td></tr>
+<tr><td>$\mathbf{h}(\mathbf{v})$ in (200)</td><td>residual</td><td><b>Clash:</b> a third meaning of $h$, the backward Euler residual.</td></tr>
+<tr><td>$N_{\mathbf{i}}(\mathbf{x})$, $w_{\mathbf{i}p}$, $\nabla w_{\mathbf{i}p}$</td><td>$w_{ip}$, $\nabla w_{ip}$</td><td>Bold $\mathbf{i}$ is a multi-index $(i, j, k)$. From section 9.1 on, Greek letters $\alpha, \beta$ index vector components.</td></tr>
+<tr><td>$\hat{\mathbf{x}}_i$</td><td>moved nodes</td><td>Imagined grid node positions at the end of the step, $\hat{\mathbf{x}}_i = \mathbf{x}_i + \Delta t\,\mathbf{v}_i$.</td></tr>
+<tr><td>$m_{ij}$, $m_i$</td><td>-</td><td>Consistent mass matrix and its lumped (diagonal) version.</td></tr>
+<tr><td>$B_{ip}$ in (143)</td><td>-</td><td>A factor of the mass matrix, $\sqrt{m_p}\,N_i(\mathbf{x}_p)$. Nothing to do with APIC's $\mathbf{B}_p$.</td></tr>
+<tr><td>$e(\hat{\mathbf{x}})$, $E(\mathbf{v})$</td><td>-</td><td>Total elastic energy; the optimisation objective (205). Not Young's modulus.</td></tr>
+<tr><td>$\mathbf{A}:\mathbf{B}$</td><td>same</td><td>$\sum_{ij}A_{ij}B_{ij}$. With a fourth-order tensor, $(\mathbb{C}:\mathbf{D})_{ij} = \sum_{kl}\mathbb{C}_{ijkl}D_{kl}$.</td></tr>
+</table>
+
+<div class="warning">
+<p><b>The $h$ trap.</b> On this site $h$ is always the time step. When you see $N(\tfrac1h(x_p - x_i))$ in equation
+(121), read $h$ as $\Delta x$. When you see $\mathbf{h}(\mathbf{v}^{n+1}) = \mathbf{0}$ in equation (200), read it as
+"the residual". Write the substitution in the margin of your copy.</p>
+</div>
+
+<h2>Section 3: Introduction</h2>
+
+<p>Two pages; read them. The key paragraphs: MPM is the generalisation of PIC and FLIP to solids; its strengths are
+automatic self-collision, automatic fracture and merging, easy multi-material coupling; and, the paragraph to
+remember, MPM is really a <i>Lagrangian</i> method that uses an Eulerian grid to compute derivatives. Particles are not
+little balls; each one stands for a chunk of continuous material, and acts as a quadrature point for integrals over
+the body. The notes also admit the price: accuracy for elastic solids is lower than with a good mesh.</p>
+
+<h2>Section 5: Kinematics theory</h2>
+
+<p>Section 5 is chapter <a href="20-deformation.html">20</a> in the notes' words. Read it carefully on the first pass;
+the notation built here is used to the end.</p>
+
+<h3>5.1 Continuum motion, equations (1) to (5)</h3>
+
+<p>Motion is a map from rest positions to current positions, $\mathbf{x} = \phi(\mathbf{X}, t)$ (1). Two examples:
+translation $\mathbf{x} = \mathbf{X} + tv\mathbf{n}$ (2), and rigid motion $\mathbf{x} = \mathbf{R}\mathbf{X} +
+\mathbf{b}$ (3). Velocity and acceleration of a fixed piece of material are time derivatives at fixed $\mathbf{X}$:
+$\mathbf{V} = \partial\phi/\partial t$ (4), $\mathbf{A} = \partial^2\phi/\partial t^2$ (5). The paragraph after (5)
+introduces the Lagrangian/Eulerian distinction: measuring on a moving piece of material, or sitting at a fixed place
+and measuring whatever passes.</p>
+
+<h3>5.2 Deformation, equations (6) and (7)</h3>
+
+<p>The deformation gradient is the Jacobian of the map, $\mathbf{F} = \partial\phi/\partial\mathbf{X}$ (6), in
+components $F_{ij} = \partial x_i/\partial X_j$ (7). It maps a tiny rest vector to its deformed version,
+$d\mathbf{x} = \mathbf{F}\,d\mathbf{X}$ (Figure 1), and $J = \det\mathbf{F}$ is the local volume ratio. For (2)
+$\mathbf{F} = \mathbf{I}$; for (3) $\mathbf{F} = \mathbf{R}$: rigid motions do not deform, and should cause no internal
+force. Two more worked examples to add to the notes' two:</p>
+<ul>
+<li>Simple shear, $x = X + \gamma Y$, $y = Y$: $\mathbf{F} = \begin{pmatrix}1&\gamma\\0&1\end{pmatrix}$, $J = 1$.
+Shape changes, area does not.</li>
+<li>Squash, $x = 2X$, $y = Y/2$: $\mathbf{F} = \operatorname{diag}(2, \tfrac12)$, $J = 1$. Again area-preserving; a
+liquid would not resist this, an elastic solid would.</li>
+</ul>
+<p>The notes' remarks on $J \le 0$ (zero volume, inversion) are worth reading: numerically it happens, and the fixed
+corotated model of section 6.3 is chosen partly because it behaves sensibly there.</p>
+
+<h3>5.3 Push forward and pull back, equations (8) to (18)</h3>
+
+<p>Any function of $\mathbf{X}$ can be turned into a function of $\mathbf{x}$ by composing with the inverse map, and
+back. That is all "push forward" and "pull back" mean. The section then derives something important. Differentiate the
+Lagrangian velocity $\mathbf{V}(\mathbf{X}, t) = \mathbf{v}(\phi(\mathbf{X}, t), t)$ in time, holding $\mathbf{X}$ fixed,
+with the chain rule (14), (15):</p>
+$$A_i = \frac{\partial v_i}{\partial t} + \frac{\partial v_i}{\partial x_j}\frac{\partial\phi_j}{\partial t}
+= \frac{\partial v_i}{\partial t} + \frac{\partial v_i}{\partial x_j}v_j.$$
+<p>So the Eulerian acceleration (17) is not $\partial\mathbf{v}/\partial t$; the second term accounts for the material
+moving to a place where the velocity is different. Equation (18) in the notes makes exactly that point,
+$\mathbf{a} \ne \partial\mathbf{v}/\partial t$; if a copy you are reading seems to say they are equal, a symbol was lost in
+text extraction.</p>
+
+<h3>5.4 Material derivative, equations (19) to (24)</h3>
+
+<p>The combination above gets a name, the material derivative $\frac{D}{Dt} = \frac{\partial}{\partial t} +
+\mathbf{v}\cdot\nabla$ (19) to (21): the rate of change seen by a particle riding with the flow. Then the most important
+result of section 5 for MPM, the evolution of $\mathbf{F}$, equations (22) to (24). The derivation (23), slowly:</p>
+$$\frac{\partial F_{ij}}{\partial t} = \frac{\partial}{\partial t}\frac{\partial\phi_i}{\partial X_j}
+= \frac{\partial V_i}{\partial X_j} = \frac{\partial v_i}{\partial x_k}\frac{\partial\phi_k}{\partial X_j}
+= \frac{\partial v_i}{\partial x_k}F_{kj}.$$
+<p>Swap the order of the two derivatives, write the Lagrangian velocity as the Eulerian one evaluated on the moving
+point, and apply the chain rule. In matrix form,</p>
+$$\dot{\mathbf{F}} = (\nabla\mathbf{v})\,\mathbf{F}. \tag{24}$$
+<p>The velocity gradient multiplies from the <i>left</i>: it is a world-space quantity acting on the already-deformed
+material. Check it on simple shear flow, $\mathbf{v} = (\dot\gamma y, 0)$: $\nabla\mathbf{v} =
+\begin{pmatrix}0&\dot\gamma\\0&0\end{pmatrix}$ and $\mathbf{F}(t) = \begin{pmatrix}1&\dot\gamma t\\0&1\end{pmatrix}$, and
+indeed $(\nabla\mathbf{v})\mathbf{F} = \begin{pmatrix}0&\dot\gamma\\0&0\end{pmatrix} = \dot{\mathbf{F}}$. Section 9.4
+discretises exactly this equation.</p>
+
+<h3>5.5 Volume and area change, equations (25) to (35)</h3>
+
+<p>Volumes scale by $J$: $dv = J\,dV$ (25) to (27). Areas are subtler, and the result, <b>Nanson's formula</b>, is
+what later converts between the two stress measures. The notes' argument, expanded: take a tiny rest area element with
+normal $\mathbf{N}$, $d\mathbf{S} = dS\,\mathbf{N}$ (28), and any tiny vector $d\mathbf{L}$; they span a prism of volume
+$dV = d\mathbf{S}\cdot d\mathbf{L}$ (30). After deformation, $dv = d\mathbf{s}\cdot d\mathbf{l} = d\mathbf{s}\cdot\mathbf{F}\,d\mathbf{L}$
+(31). Since $dv = J\,dV$,</p>
+$$J\,d\mathbf{S}\cdot d\mathbf{L} = d\mathbf{s}\cdot\mathbf{F}\,d\mathbf{L} = (\mathbf{F}^Td\mathbf{s})\cdot d\mathbf{L}\quad\text{for every } d\mathbf{L},$$
+<p>so $\mathbf{F}^Td\mathbf{s} = J\,d\mathbf{S}$, that is</p>
+$$\mathbf{n}\,ds = J\,\mathbf{F}^{-T}\mathbf{N}\,dS. \tag{34}$$
+<p>Equation (35) is the same statement under an integral sign: a flux through a deformed surface equals a flux through
+the rest surface with the integrand multiplied by $J\mathbf{F}^{-T}$.</p>
+
+<h3>Check your understanding</h3>
+<details><summary>1. In a uniform stretch $\mathbf{F} = \operatorname{diag}(1.1, 1)$, how do lengths, areas and the area of a face with normal $y$ change?</summary>
+<p>Lengths along $x$ grow by 10 %, along $y$ not at all; volume (area in 2D) grows by $J = 1.1$. A face with normal
+$\mathbf{N} = (0, 1)$ is a segment along $x$, so its length grows by 1.1. Nanson agrees: $J\mathbf{F}^{-T}\mathbf{N} =
+1.1\cdot(0, 1) $, so $ds = 1.1\,dS$ with unchanged normal.</p>
+</details>
+<details><summary>2. Why does $\dot{\mathbf{F}} = \mathbf{F}\,\nabla\mathbf{v}$ (right multiplication) give wrong answers?</summary>
+<p>$\nabla\mathbf{v}$ is a derivative with respect to world positions, so it acts on world-space vectors, which is what
+$\mathbf{F}$ produces. $\mathbf{F}\nabla\mathbf{v}$ would apply the world-space velocity gradient to rest-space vectors.
+For a rotated body the two differ, and the right-multiplied version spins the material incorrectly. The same mistake
+appears as a typo in the PB-MPM paper (<a href="30-reading-pbmpm.html">chapter 30</a>).</p>
+</details>
+
+<h2>Section 6: Hyperelasticity</h2>
+
+<p>Section 6 is chapter <a href="21-hyperelasticity.html">21</a> plus the start of <a href="25-plasticity.html">25</a>.
+Read 6.1 to 6.3 carefully, skim 6.4, read 6.5 when you reach plasticity.</p>
+
+<h3>6.1 First Piola-Kirchhoff stress, equations (36) to (45)</h3>
+
+<p>A hyperelastic material is defined by an energy density $\Psi(\mathbf{F})$, energy per unit <i>rest</i> volume. Its
+stress is the derivative, $\mathbf{P} = \partial\Psi/\partial\mathbf{F}$ (36), (37). Equation (38) relates it to the
+Cauchy stress:</p>
+$$\boldsymbol\sigma = \frac1J\mathbf{P}\mathbf{F}^T = \frac{1}{\det\mathbf{F}}\frac{\partial\Psi}{\partial\mathbf{F}}\mathbf{F}^T. \tag{38}$$
+<p>The notes state (38) here and justify it in section 7.2; we derive it there too. Then the requirement that rigid
+motion causes no stress leads to $\Psi(\mathbf{F}) = \tilde\Psi(\mathbf{F}^T\mathbf{F})$ (40), isotropy to a function of
+invariants (41) to (44), and finally to a function of singular values, $\Psi(\mathbf{F}) = \hat\Psi(\boldsymbol\Sigma)$
+with the "polar SVD" $\mathbf{F} = \mathbf{U}\boldsymbol\Sigma\mathbf{V}^T$, where $\mathbf{U}, \mathbf{V}$ are
+rotations (45). The polar decomposition is $\mathbf{F} = \mathbf{R}\mathbf{S}$ with $\mathbf{R} = \mathbf{U}\mathbf{V}^T$,
+the rotation closest to $\mathbf{F}$, and $\mathbf{S} = \mathbf{V}\boldsymbol\Sigma\mathbf{V}^T$ symmetric.</p>
+
+<div class="note">
+<p><b>In 2D you do not need an SVD for $\mathbf{R}$.</b> For $\mathbf{F} = \begin{pmatrix}a&b\\c&d\end{pmatrix}$ with
+$\det\mathbf{F} > 0$, the polar rotation is the rotation by $\theta = \operatorname{atan2}(c - b,\ a + d)$. The checks at the
+end of this chapter use exactly this.</p>
+</div>
+
+<h3>6.2 Neo-Hookean, equations (46) to (48)</h3>
+
+$$\Psi(\mathbf{F}) = \frac\mu2\big(\operatorname{tr}(\mathbf{F}^T\mathbf{F}) - d\big) - \mu\log J + \frac\lambda2\log^2J, \tag{46}$$
+$$\mu = \frac{E}{2(1+\nu)}, \qquad \lambda = \frac{E\nu}{(1+\nu)(1-2\nu)}, \tag{47}$$
+$$\mathbf{P} = \mu(\mathbf{F} - \mathbf{F}^{-T}) + \lambda\log J\,\mathbf{F}^{-T}. \tag{48}$$
+<p>The notes give (48) without derivation. Term by term: $\operatorname{tr}(\mathbf{F}^T\mathbf{F}) = \sum F_{ij}^2$, whose
+derivative is $2\mathbf{F}$, so the first term gives $\mu\mathbf{F}$. For the logs you need the derivative of the
+determinant, $\partial J/\partial\mathbf{F} = J\mathbf{F}^{-T}$ (it appears as equation (100); proof in section 7.1
+below), so $\partial\log J/\partial\mathbf{F} = \mathbf{F}^{-T}$, giving $-\mu\mathbf{F}^{-T}$ and $\lambda\log
+J\,\mathbf{F}^{-T}$. A number to anchor it: $E = 10^4$ Pa (a soft jelly) and $\nu = 0.3$ give $\mu = 3846$ Pa and Lamé
+$\lambda = 5769$ Pa.</p>
+
+<h3>6.3 Fixed corotated, equations (49) to (59)</h3>
+
+$$\Psi = \mu\sum_i(\sigma_i - 1)^2 + \frac\lambda2(J - 1)^2, \qquad
+\mathbf{P} = 2\mu(\mathbf{F} - \mathbf{R}) + \lambda(J - 1)J\mathbf{F}^{-T}. \tag{49, 52}$$
+<p>The step (51) the notes call "can be shown": $\sum_i\sigma_i^2 = \|\mathbf{F}\|_F^2$, whose derivative is
+$2\mathbf{F}$; and each singular value has derivative $\partial\sigma_i/\partial\mathbf{F} = \mathbf{u}_i\mathbf{v}_i^T$
+(columns of $\mathbf{U}$ and $\mathbf{V}$), so $\partial\sum\sigma_i/\partial\mathbf{F} = \mathbf{U}\mathbf{V}^T =
+\mathbf{R}$. Then $\mu\sum(\sigma_i^2 - 2\sigma_i + 1)$ gives $2\mu\mathbf{F} - 2\mu\mathbf{R}$, and $\tfrac\lambda2(J-1)^2$
+gives $\lambda(J-1)\,J\mathbf{F}^{-T}$. Notice $\sum(\sigma_i - 1)^2 = \|\mathbf{F} - \mathbf{R}\|_F^2$, the squared
+distance from $\mathbf{F}$ to the nearest rotation. Keep that in mind for PB-MPM, whose elastic constraint is exactly
+"move $\mathbf{F}$ to $\mathbf{R}$".</p>
+
+<p>Worked example: stretch 10 % along $x$, $\mathbf{F} = \operatorname{diag}(1.1, 1)$, with the jelly above. Then
+$\mathbf{R} = \mathbf{I}$, $J = 1.1$, and</p>
+$$\mathbf{P} = 2\mu\operatorname{diag}(0.1, 0) + \lambda(0.1)(1.1)\operatorname{diag}(\tfrac1{1.1}, 1) = \operatorname{diag}(1346,\ 635)\ \text{Pa}.$$
+<p>The $y$ entry is nonzero although nothing was stretched in $y$: the material wants its area back. Hold onto these
+numbers for section 7.2.</p>
+
+<p>Equations (53) to (59) compute the differential $\delta\mathbf{P}$ for implicit solvers. The only hard part is
+$\delta\mathbf{R}$. The notes' trick (57) to (59): differentiate $\mathbf{F} = \mathbf{R}\mathbf{S}$, multiply by
+$\mathbf{R}^T$, and subtract the transpose so that the unknown symmetric $\delta\mathbf{S}$ cancels:</p>
+$$\mathbf{R}^T\delta\mathbf{F} - \delta\mathbf{F}^T\mathbf{R} = (\mathbf{R}^T\delta\mathbf{R})\mathbf{S} + \mathbf{S}(\mathbf{R}^T\delta\mathbf{R}),$$
+<p>using that $\mathbf{R}^T\delta\mathbf{R}$ is antisymmetric. In 3D it is a $3\times3$ linear system for the three
+entries of that antisymmetric matrix. In 2D it has a closed form worth having: with $\mathbf{R}^T\delta\mathbf{R} =
+\delta\theta\begin{pmatrix}0&-1\\1&0\end{pmatrix}$, the right-hand side is $\delta\theta\operatorname{tr}(\mathbf{S})$
+times the same matrix, so</p>
+$$\delta\theta = \frac{(\mathbf{R}^T\delta\mathbf{F})_{21} - (\mathbf{R}^T\delta\mathbf{F})_{12}}{\operatorname{tr}\mathbf{S}}.$$
+<p>Also in 2D, $J\mathbf{F}^{-T}$ is the cofactor matrix $\begin{pmatrix}d&-c\\-b&a\end{pmatrix}$, linear in the
+entries of $\mathbf{F}$, so its differential is trivial.</p>
+
+<h3>6.4 A practical differentiation strategy, equations (60) to (77)</h3>
+
+<p>Skim on a first pass. The useful results: for any isotropic model, $\mathbf{P} = \mathbf{U}\hat{\mathbf{P}}\mathbf{V}^T$
+with $\hat{\mathbf{P}} = \operatorname{diag}(\partial\hat\Psi/\partial\sigma_i)$ (63). The proof is short and nice: rotating
+after deforming does not change energy, which gives $\mathbf{P}(\mathbf{R}\mathbf{F}) = \mathbf{R}\mathbf{P}(\mathbf{F})$;
+isotropy gives $\mathbf{P}(\mathbf{F}\mathbf{R}) = \mathbf{P}(\mathbf{F})\mathbf{R}$; apply both to
+$\mathbf{F} = \mathbf{U}\boldsymbol\Sigma\mathbf{V}^T$. The same rotation argument gives $\partial\mathbf{P}/\partial\mathbf{F}$
+in terms of its value at a diagonal $\boldsymbol\Sigma$ (65) to (72), which can be computed with symbolic software
+(the Mathematica listings; skip them). The result (75) to (77) is block diagonal, with $2\times2$ blocks</p>
+$$\mathbf{B}_{ij} = \frac{1}{\sigma_i^2 - \sigma_j^2}\begin{pmatrix}\sigma_i\hat\Psi_{,i} - \sigma_j\hat\Psi_{,j} & \sigma_j\hat\Psi_{,i} - \sigma_i\hat\Psi_{,j}\\ \sigma_j\hat\Psi_{,i} - \sigma_i\hat\Psi_{,j} & \sigma_i\hat\Psi_{,i} - \sigma_j\hat\Psi_{,j}\end{pmatrix}
+= \frac{\hat\Psi_{,i} - \hat\Psi_{,j}}{2(\sigma_i - \sigma_j)}\begin{pmatrix}1&1\\1&1\end{pmatrix} + \frac{\hat\Psi_{,i} + \hat\Psi_{,j}}{2(\sigma_i + \sigma_j)}\begin{pmatrix}1&-1\\-1&1\end{pmatrix}.$$
+<p>The first form divides by zero when two singular values are equal; the second (77) shows that the first fraction has
+a finite limit for a symmetric $\hat\Psi$ (a difference quotient that tends to a combination of second derivatives) and
+only the second fraction can genuinely blow up, when
+$\sigma_i + \sigma_j \to 0$ in inverted states. The notes clamp that denominator at $10^{-6}$. You can check the
+equality of the two forms by putting them over a common denominator.</p>
+
+<h3>6.5 Snow plasticity, equations (78) to (87)</h3>
+
+<p>Read with <a href="25-plasticity.html">chapter 25</a>. $\mathbf{F} = \mathbf{F}_E\mathbf{F}_P$ (78): the plastic part is
+deformation the material has forgotten, only $\mathbf{F}_E$ makes stress. Each step: assume the new deformation is all
+elastic, $\tilde{\mathbf{F}}_E = \mathbf{F}^{n+1}(\mathbf{F}_P^n)^{-1}$ (81); clamp its singular values to $[1 -
+\theta_c, 1 + \theta_s]$ (82) to (84); put the excess into $\mathbf{F}_P^{n+1} = (\mathbf{F}_E^{n+1})^{-1}\mathbf{F}^{n+1}$
+(86). Hardening: $\mu$ and $\lambda$ scale by $e^{\xi(1 - J_P)}$ (87), stiffer under compression, weaker under
+stretching, with $\xi$ between 3 and 10. The notes are candid that (87) is empirical and that a principled model must
+obey thermodynamics; for that they point to the Drucker-Prager sand paper.</p>
+
+<h3>Check your understanding</h3>
+<details><summary>1. Show that both models give $\mathbf{P} = \mathbf{0}$ at $\mathbf{F} = \mathbf{I}$, and at any rotation.</summary>
+<p>Neo-Hookean: at $\mathbf{F} = \mathbf{R}$, $\mathbf{F}^{-T} = \mathbf{R}$ and $J = 1$, so $\mu(\mathbf{R} - \mathbf{R}) +
+0 = \mathbf{0}$. Fixed corotated: the polar rotation of $\mathbf{R}$ is $\mathbf{R}$, so $2\mu(\mathbf{R} - \mathbf{R}) + 0 =
+\mathbf{0}$.</p>
+</details>
+<details><summary>2. Which model can survive $J \le 0$, and why does it matter for MPM?</summary>
+<p>Neo-Hookean contains $\log J$, undefined for $J \le 0$. Fixed corotated is a polynomial in $J$ and $\sigma_i$ and
+stays finite. MPM evolves $\mathbf{F}$ by a grid velocity gradient that knows nothing about inversion, so a particle can
+end up inverted after a violent step; the snow model is built on fixed corotated partly for this reason.</p>
+</details>
+
+<h2>Section 7: Governing equations</h2>
+
+<p>The physics, in both views: mass conservation $R J = R_0$ (88) or $\frac{D\rho}{Dt} + \rho\nabla\cdot\mathbf{v} = 0$
+(90), and momentum $R_0\mathbf{A} = \nabla_{\mathbf{X}}\cdot\mathbf{P} + R_0\mathbf{g}$ (89) or $\rho\frac{D\mathbf{v}}{Dt} =
+\nabla\cdot\boldsymbol\sigma + \rho\mathbf{g}$ (91). Read all of section 7; it is where the two stresses meet.</p>
+
+<h3>7.1 Conservation of mass, equations (92) to (102)</h3>
+
+<p>Mass in any piece of material is constant: $\int_{B^t}\rho\,d\mathbf{x} = \int_{B^0}R\,J\,d\mathbf{X} =
+\int_{B^0}R_0\,d\mathbf{X}$ (95), so $RJ = R_0$ (96). To get the Eulerian form the notes need $\dot J$ (99), which uses
+the derivative of the determinant (100). Here is that derivative, which the notes quote. For a small change
+$\epsilon\mathbf{G}$,</p>
+$$\det(\mathbf{F} + \epsilon\mathbf{G}) = \det\mathbf{F}\,\det(\mathbf{I} + \epsilon\mathbf{F}^{-1}\mathbf{G}) \approx J\big(1 + \epsilon\operatorname{tr}(\mathbf{F}^{-1}\mathbf{G})\big),$$
+<p>because $\det(\mathbf{I} + \epsilon\mathbf{M}) = 1 + \epsilon\operatorname{tr}\mathbf{M} + O(\epsilon^2)$. And
+$\operatorname{tr}(\mathbf{F}^{-1}\mathbf{G}) = \mathbf{F}^{-T}:\mathbf{G}$, so $\partial J/\partial\mathbf{F} = J\mathbf{F}^{-T}$
+(100). With (24), $\dot J = J\mathbf{F}^{-T}:\dot{\mathbf{F}} = J\operatorname{tr}(\mathbf{F}^{-1}\nabla\mathbf{v}\,\mathbf{F}) =
+J\,\nabla\cdot\mathbf{v}$ (99). Divergence of velocity is the rate of volume change; PB-MPM's liquid constraint is built
+on the discrete version of this line.</p>
+
+<h3>7.2 Conservation of momentum, and the push-forward of stress, equations (103) to (112)</h3>
+
+<p>Stress is defined through traction: the force per area across a surface with normal $\mathbf{n}$ is
+$\boldsymbol\sigma\mathbf{n}$ (104). That is the Cauchy stress, measured per <i>current</i> area. Newton's law for a
+piece of material (105) leads to $\rho\mathbf{a} = \nabla\cdot\boldsymbol\sigma + \mathbf{f}^{\text{ext}}$ (108). Then
+the step that defines $\mathbf{P}$: pull the surface force back to the rest shape with Nanson's formula (34),</p>
+$$\int_{\partial B^t}\boldsymbol\sigma\mathbf{n}\,ds = \int_{\partial B^0}\boldsymbol\sigma\,J\mathbf{F}^{-T}\mathbf{N}\,dS
+= \int_{\partial B^0}\mathbf{P}\mathbf{N}\,dS, \qquad \mathbf{P} = J\boldsymbol\sigma\mathbf{F}^{-T}. \tag{109, 110}$$
+<p>So $\mathbf{P}$ is the stress that gives the same force when you integrate over the <i>rest</i> surface. Solve for
+$\boldsymbol\sigma$ and you get (38), $\boldsymbol\sigma = \tfrac1J\mathbf{P}\mathbf{F}^T$. In the worked example of
+6.3, $\boldsymbol\sigma = \operatorname{diag}(1346\cdot1.1,\ 635)/1.1 = \operatorname{diag}(1346,\ 577)$ Pa. The $yy$
+entries differ by the factor 1.1, exactly the stretch of the faces they act on: the same force spread over a face
+10 % longer.</p>
+
+<p>Two side remarks in this section deserve a note. Angular momentum conservation requires $\boldsymbol\sigma$ to be
+symmetric, which holds for any $\Psi$ that depends on $\mathbf{F}^T\mathbf{F}$ (we will use this to show the MPM grid
+forces conserve angular momentum). And $\mathbf{P}$ is generally <i>not</i> symmetric, which is why it is less used in
+engineering but convenient in code: it is what $\Psi$ hands you.</p>
+
+<h3>7.3 Weak form, equations (113) to (120)</h3>
+
+<p>The step that makes MPM a finite-element method in disguise. Take the Lagrangian momentum equation without external
+force, $R_0A_i = P_{ij,j}$ (113), (114), multiply by an arbitrary test function $Q_i(\mathbf{X})$ and integrate (115).
+Integrate by parts, using $Q_iP_{ij,j} = (Q_iP_{ij})_{,j} - Q_{i,j}P_{ij}$ (116), and turn the divergence into a boundary
+term (117):</p>
+$$\int_{\Omega^0}Q_iR_0A_i\,d\mathbf{X} = \int_{\partial\Omega^0}Q_iT_i\,dS - \int_{\Omega^0}Q_{i,j}P_{ij}\,d\mathbf{X}, \tag{118}$$
+<p>with $T_i = P_{ij}N_j$ the boundary traction. The stress now appears without a derivative on it; the derivative has
+moved onto the test function. Finally push to the current configuration: $Q_{i,j} = q_{i,k}F_{kj}$ (119), and
+$\int Q_{i,j}P_{ij}\,d\mathbf{X} = \int q_{i,k}\,P_{ij}F_{kj}\,d\mathbf{X} = \int q_{i,k}\,J\sigma_{ik}\,d\mathbf{X} =
+\int q_{i,k}\sigma_{ik}\,d\mathbf{x}$, which gives the Eulerian weak form (120):</p>
+$$\int_{\Omega^t}q_i\rho a_i\,d\mathbf{x} = \int_{\partial\Omega^t}q_it_i\,ds - \int_{\Omega^t}q_{i,k}\sigma_{ik}\,d\mathbf{x}. \tag{120}$$
+<p>"Holds for every $q$" is what makes this equivalent to the original equation. Section 9 discretises it by letting
+$q$ range over the grid's basis functions.</p>
+
+<h3>Check your understanding</h3>
+<details><summary>1. Why integrate by parts at all?</summary>
+<p>Two reasons. The stress is only known at particles (quadrature points), and we cannot differentiate a set of point
+values; after integration by parts, only the smooth, known basis functions are differentiated. And the boundary term
+is where tractions and free surfaces enter: a free surface simply means that term is zero.</p>
+</details>
+<details><summary>2. A material has $\boldsymbol\sigma = p\mathbf{I}$ (pure pressure) and $\mathbf{F} = \operatorname{diag}(2, 1)$. What is $\mathbf{P}$?</summary>
+<p>$\mathbf{P} = J\boldsymbol\sigma\mathbf{F}^{-T} = 2p\operatorname{diag}(\tfrac12, 1) = \operatorname{diag}(p, 2p)$. The
+pressure pushes equally in every direction, but the face with normal $y$ is twice as long as at rest, so per unit
+<i>rest</i> length it carries twice the force.</p>
+</details>
+
+<h2>Section 8: Material particles</h2>
+
+<h3>8.1 Eulerian interpolating functions, equations (121) to (124)</h3>
+
+<p>Tensor-product weights $N_{\mathbf{i}}(\mathbf{x}_p) = N(\tfrac{x_p - x_i}{\Delta x})N(\tfrac{y_p - y_i}{\Delta x})N(\tfrac{z_p -
+z_i}{\Delta x})$ (121), remembering that the notes write $h$ for $\Delta x$. The kernels: cubic (122), quadratic (123),
+linear (124), and the gradient by the product rule. Read the paragraph on why linear weights are unsuitable for MPM:
+their gradient jumps when a particle crosses a cell boundary (the <i>cell-crossing instability</i>), and the gradient can
+be large where the weight is tiny, putting big forces on nearly massless nodes. Quadratic weights are the usual
+compromise; cubic ones are wider, smoother and costlier.</p>
+
+<h3>8.2 to 8.4 Mass, momentum, and back, equations (125) to (132)</h3>
+
+<p>PIC transfers with conservation proofs by partition of unity, the same as section 5.1 of the APIC paper
+(<a href="28-reading-apic.html">chapter 28</a>). The notes flag that they will use APIC instead in section 10.1. Read
+quickly.</p>
+
+<h2>Section 9: Discretization</h2>
+
+<p>The heart of the notes. Read it slowly, twice. Sections 9.1 to 9.3 discretise the weak form; 9.4 the deformation
+gradient; 9.5 shows the result is the gradient of an energy. Below, the whole chain is assembled in one place, with the
+steps the notes leave out.</p>
+
+<h3>From the weak form to grid forces, equations (133) to (155)</h3>
+
+<p><b>Time (133) to (135).</b> Replace the acceleration by $(\mathbf{v}^{n+1} - \mathbf{v}^n)/\Delta t$, and do all
+integrals over the body at time $t^n$. From here the notes switch to Greek letters for components.</p>
+
+<p><b>Space (136) to (141).</b> Write the test function and both velocities in the grid basis: $q_\alpha = \sum_i
+q_{i\alpha}N_i(\mathbf{x})$, $v_\alpha^{n+1} = \sum_j v_{j\alpha}^{n+1}N_j(\mathbf{x})$, and so on. Substituting turns the
+left side into $\sum_{ij}q_{i\alpha}\,m_{ij}(v_{j\alpha}^{n+1} - v_{j\alpha}^n)/\Delta t$ with the <b>mass matrix</b></p>
+$$m_{ij} = \int_{\Omega^{t^n}}N_i\,\rho\,N_j\,d\mathbf{x} \approx \sum_p m_pN_i(\mathbf{x}_p)N_j(\mathbf{x}_p). \tag{142, 143}$$
+<p>Choosing $q$ to be 1 for one component of one node and 0 elsewhere (144) gives one equation per grid degree of
+freedom. That is how "for every test function" becomes "for every node".</p>
+
+<p><b>Mass lumping (145), (146).</b> The full matrix may be singular (wherever a region has fewer particles than
+nodes; question 3 below), and it couples every node to its neighbours. Replace each row by its sum. Because $\sum_jN_j = 1$,
+the row sum is $\int N_i\rho\,d\mathbf{x} \approx \sum_pN_i(\mathbf{x}_p)m_p = m_i$, exactly the P2G mass. So</p>
+$$\frac{(m\mathbf{v})_i^{n+1} - (m\mathbf{v})_i^n}{\Delta t} = \underbrace{\int N_i\mathbf{t}\,ds}_{\text{boundary}} - \int\boldsymbol\sigma\nabla N_i\,d\mathbf{x}. \tag{147}$$
+<p>The right side is the force on node $i$.</p>
+
+<p><b>Quadrature (148).</b> Approximate the integral by a sum over particles, each with its current volume $V_p^n$:
+$\int\boldsymbol\sigma\nabla N_i\,d\mathbf{x} \approx \sum_p\boldsymbol\sigma_p\nabla w_{ip}V_p^n$. This is the sentence in which
+particles become quadrature points.</p>
+
+<p><b>Volume (149) to (155).</b> Two ways to get $V_p^n$: from the grid density (152), or from $V_p^n = J_p^nV_p^0$
+(153), which is what you use when you track $\mathbf{F}_p$. With (38),</p>
+$$\sum_p\boldsymbol\sigma_p\nabla w_{ip}V_p^n = \sum_p\frac1{J_p}\mathbf{P}_p\mathbf{F}_p^T\nabla w_{ip}\,J_pV_p^0 = \sum_p\mathbf{P}_p\mathbf{F}_p^T\nabla w_{ip}V_p^0. \tag{154}$$
+<p>The $J$s cancel, and the grid force is</p>
+$$\mathbf{f}_i = -\sum_pV_p^0\,\mathbf{P}_p\mathbf{F}_p^T\nabla w_{ip}. \tag{155, 189}$$
+<p>This answers the question this chapter opened with: the force formula contains $\mathbf{P}\mathbf{F}^T$ because the
+weak form is integrated over the current shape, where the natural stress is $\boldsymbol\sigma = \mathbf{P}\mathbf{F}^T/J$, and
+the $1/J$ is absorbed into the current volume. $\mathbf{P}\mathbf{F}^T = J\boldsymbol\sigma$ is the Kirchhoff stress
+$\boldsymbol\tau$. Units check: Pa times m$^3$ times 1/m is N.</p>
+
+<h3>9.4 Deformation gradient evolution, equations (156) to (162)</h3>
+
+<p>Discretise (24) with a backward difference in time and the grid velocity in space: $\nabla\mathbf{v}^{n+1}(\mathbf{x}) =
+\sum_i\mathbf{v}_i^{n+1}(\nabla N_i)^T$ (160), so</p>
+$$\mathbf{F}_p^{n+1} = \Big(\mathbf{I} + \Delta t\sum_i\mathbf{v}_i^{n+1}(\nabla w_{ip}^n)^T\Big)\mathbf{F}_p^n. \tag{162}$$
+<p>Left multiplication, as in (24). Note which velocity: the <i>new</i> grid velocity, which makes the scheme symplectic
+Euler.</p>
+
+<h3>9.5 Forces as an energy gradient, equations (163) to (171)</h3>
+
+<p>The second route to the same force, and the one implicit MPM builds on. Imagine the grid nodes move with their new
+velocities, $\hat{\mathbf{x}}_i = \mathbf{x}_i + \Delta t\,\mathbf{v}_i^{n+1}$ (165), and let (162) define each particle's
+deformation gradient as a function of those imagined positions (166):</p>
+$$\mathbf{F}_p(\hat{\mathbf{x}}) = \Big(\mathbf{I} + \sum_j(\hat{\mathbf{x}}_j - \mathbf{x}_j)(\nabla w_{jp})^T\Big)\mathbf{F}_p^n.$$
+<p>The total elastic energy is $e(\hat{\mathbf{x}}) = \sum_pV_p^0\Psi(\mathbf{F}_p(\hat{\mathbf{x}}))$ (164). Differentiate with
+respect to component $\alpha$ of node $i$. Only the term $j = i$ depends on $\hat x_{i\alpha}$, and it changes row $\alpha$
+of $\mathbf{F}_p$:</p>
+$$\frac{\partial(F_p)_{\beta\gamma}}{\partial\hat x_{i\alpha}} = \delta_{\alpha\beta}\sum_\delta(\nabla w_{ip})_\delta(F_p^n)_{\delta\gamma}
+= \delta_{\alpha\beta}\big((\mathbf{F}_p^n)^T\nabla w_{ip}\big)_\gamma. \tag{168}$$
+<p>Then the chain rule, with $\mathbf{P} = \partial\Psi/\partial\mathbf{F}$:</p>
+$$\frac{\partial e}{\partial\hat x_{i\alpha}} = \sum_pV_p^0\sum_{\beta\gamma}P_{\beta\gamma}\,\delta_{\alpha\beta}\big((\mathbf{F}_p^n)^T\nabla w_{ip}\big)_\gamma
+= \sum_pV_p^0\big(\mathbf{P}_p(\mathbf{F}_p^n)^T\nabla w_{ip}\big)_\alpha. \tag{169}$$
+<p>Evaluated at $\hat{\mathbf{x}} = \mathbf{x}$ (no motion yet, so $\mathbf{F}_p = \mathbf{F}_p^n$) this is minus the force
+(155). The weak form and the energy give the same discrete force. That is not a coincidence: it is why MPM conserves
+energy well and why implicit MPM can be written as optimisation.</p>
+
+<h3>Check your understanding</h3>
+<details><summary>1. Show that the grid forces (155) sum to zero, so internal forces conserve linear momentum.</summary>
+<p>$\sum_i\mathbf{f}_i = -\sum_pV_p^0\mathbf{P}_p\mathbf{F}_p^T\sum_i\nabla w_{ip}$, and $\sum_i\nabla w_{ip} = \nabla\sum_iw_{ip}
+= \nabla 1 = \mathbf{0}$.</p>
+</details>
+<details><summary>2. Show they also conserve angular momentum, if $\boldsymbol\sigma$ is symmetric.</summary>
+<p>Differentiate linear reproduction $\sum_i\mathbf{x}_iw_{ip} = \mathbf{x}_p$ with respect to $\mathbf{x}_p$:
+$\sum_i\mathbf{x}_i(\nabla w_{ip})^T = \mathbf{I}$. The torque is $\sum_i\mathbf{x}_i\times\mathbf{f}_i$, whose components are
+$-\epsilon_{\alpha\beta\gamma}\sum_pV_p^0\,\tau_{\gamma\delta}\sum_i x_{i\beta}(\nabla w_{ip})_\delta =
+-\epsilon_{\alpha\beta\gamma}\sum_pV_p^0\tau_{\gamma\beta}$, with $\boldsymbol\tau = \mathbf{P}\mathbf{F}^T$. Contracting the
+antisymmetric $\epsilon$ with a symmetric $\boldsymbol\tau$ gives zero. Combined with APIC transfers, the whole explicit step
+conserves angular momentum.</p>
+</details>
+<details><summary>3. Why does the mass matrix in (143) satisfy $\mathbf{z}^T\mathbf{M}\mathbf{z} \ge 0$, and why can it still be singular?</summary>
+<p>$\mathbf{z}^T\mathbf{M}\mathbf{z} = \sum_pm_p(\sum_iz_iN_{ip})^2 \ge 0$. It is singular whenever some nonzero $\mathbf{z}$
+makes $\sum_iz_iN_{ip} = 0$ at every particle, which happens easily when there are fewer particles than nodes in a
+region, for instance near a free surface. Lumping replaces it by the diagonal $m_i$, which is positive at every node
+that any particle touches.</p>
+</details>
+
+<h2>Section 10: Explicit time integration</h2>
+
+<p>Practitioner's summary of everything so far. Read it with your chapter-24 code open.</p>
+
+<h3>10.1 APIC transfers, equations (172) to (180)</h3>
+
+<p>The APIC transfers (172) to (176) exactly as in the APIC paper, with $\mathbf{D}_p = \tfrac14\Delta x^2\mathbf{I}$ for
+quadratic weights. Equations (177) to (180) give the version for linear weights that stores $\mathbf{C}_p$ directly, with
+$\mathbf{C}_p = \sum_i\mathbf{v}_i(\nabla w_{ip})^T$ (180); the notes point out that this is the velocity gradient the
+$\mathbf{F}$ update already computes. Both statements are derived in <a href="28-reading-apic.html">chapter 28</a>.</p>
+
+<p><b>What the notes do not say, and what came next: MLS-MPM.</b> For quadratic weights, APIC's
+$\mathbf{C}_p = \tfrac{4}{\Delta x^2}\sum_iw_{ip}\mathbf{v}_i(\mathbf{x}_i - \mathbf{x}_p)^T$ and the $\mathbf{F}$ update's
+$\sum_i\mathbf{v}_i(\nabla w_{ip})^T$ are two estimates of the same velocity gradient. MLS-MPM (Hu et al. 2018) uses the
+first for both, which amounts to replacing $\nabla w_{ip}$ everywhere by $\tfrac{4}{\Delta x^2}w_{ip}(\mathbf{x}_i -
+\mathbf{x}_p)$ (for linear weights this is the trilinear identity; for quadratic it is the gradient of a moving-least-squares
+fit). Substitute into P2G plus the force (155), and the grid momentum after forces becomes one sum:</p>
+$$(m\mathbf{v})_i + \Delta t\,\mathbf{f}_i = \sum_pw_{ip}\Big[m_p\mathbf{v}_p + \Big(m_p\mathbf{C}_p - \frac{4\Delta t}{\Delta x^2}V_p^0\mathbf{P}_p\mathbf{F}_p^T\Big)(\mathbf{x}_i - \mathbf{x}_p)\Big],$$
+<p>with $\mathbf{F}_p \leftarrow (\mathbf{I} + \Delta t\,\mathbf{C}_p)\mathbf{F}_p$ after G2P. One loop, one matrix per
+particle, no weight gradients. Because the same approximate gradient is used in the force and in the $\mathbf{F}$ update,
+the force is still exactly minus the gradient of $\sum_pV_p^0\Psi(\mathbf{F}_p(\hat{\mathbf{x}}))$: redo the derivation of
+(169) with the replaced gradient and nothing changes. Momentum is still conserved because $\sum_iw_{ip}(\mathbf{x}_i -
+\mathbf{x}_p) = \mathbf{0}$. This is the scheme PB-MPM uses for its transfers.</p>
+
+<h3>10.2 to 10.4 F update, state update, forces, equations (181) to (190)</h3>
+
+<p>(181) is (162) again. (182), (183) are symplectic Euler on the grid: velocity first, then (imaginary) positions.
+(184) to (186) make the point that the grid positions are a function of the grid velocities, so the explicit force is the
+force "at zero grid motion" (185). (187) to (189) restate the energy-gradient force; (190) gives the Cauchy-stress form
+for materials with no energy, $\mathbf{f}_i = -\sum_pV_p^n\boldsymbol\sigma_p\nabla w_{ip}$, which is how you would write a
+fluid with an equation of state.</p>
+
+<h3>10.5 The full algorithm</h3>
+
+<p>Eight steps. Here they are with what each one is for and what to watch out for.</p>
+<ol>
+<li><b>P2G.</b> Grid mass and momentum with APIC (172), (173).</li>
+<li><b>Grid velocities</b>, $\mathbf{v}_i = (m\mathbf{v})_i/m_i$. Nodes with zero mass get zero velocity. Read the notes'
+remark here: compare against exactly 0, not a small threshold. Tiny masses give large velocities but are weighted by tiny
+weights again on the way back; a threshold breaks momentum conservation.</li>
+<li><b>Identify grid degrees of freedom</b>: the nodes with mass. Only these are unknowns, which matters for the implicit
+solve.</li>
+<li><b>Grid forces</b> (189).</li>
+<li><b>Grid velocity update</b> (183), then boundary conditions and collisions (section 12.1). Because the update is
+explicit, each node can be overwritten independently.</li>
+<li><b>Update $\mathbf{F}_p$</b> with (181). The grid never actually moves.</li>
+<li><b>G2P</b>: new $\mathbf{v}_p$ and $\mathbf{B}_p$ (175), (176).</li>
+<li><b>Advect</b>: $\mathbf{x}_p \leftarrow \mathbf{x}_p + \Delta t\,\mathbf{v}_p$. The notes remark that with FLIP you
+must instead interpolate the moved grid positions; for PIC and APIC the two are identical.</li>
+</ol>
+
+<p>In code, the skeleton of one step (2D, quadratic weights; each loop is over a particle's 3 by 3 stencil):</p>
+<pre><code class="language-js">// 1. P2G (APIC) and 4. forces, in one particle loop
+for (const p of particles) {
+  const C = scale(p.B, 4 / (dx * dx));
+  const tau = mul(P(p.F), transpose(p.F));           // Kirchhoff stress P F^T
+  forEachNode(p, (i, w, gradW, r) => {               // r = x_i - x_p
+    grid.m[i] += w * p.m;
+    grid.mv[i] = add(grid.mv[i], scale(add(p.v, mulVec(C, r)), w * p.m));
+    grid.f[i] = sub(grid.f[i], scale(mulVec(tau, gradW), p.V0));
+  });
+}
+// 2., 3., 5. grid velocities, forces, boundaries
+for (const i of grid.activeNodes()) {
+  grid.v[i] = scale(add(grid.mv[i], scale(grid.f[i], h)), 1 / grid.m[i]);
+  applyBoundary(i);
+}
+// 6., 7., 8. F update, G2P, advect
+for (const p of particles) {
+  let v = zero(), B = zeroMat(), gradV = zeroMat();
+  forEachNode(p, (i, w, gradW, r) => {
+    v = add(v, scale(grid.v[i], w));
+    B = add(B, scale(outer(grid.v[i], r), w));
+    gradV = add(gradV, outer(grid.v[i], gradW));
+  });
+  p.F = mul(add(I, scale(gradV, h)), p.F);
+  p.v = v; p.B = B;
+  p.x = add(p.x, scale(v, h));
+}</code></pre>
+
+<div class="warning">
+<p><b>What the notes leave out: the time step.</b> Explicit MPM is only conditionally stable, like the symplectic Euler
+spring of <a href="03-time-integration.html">chapter 3</a>. Two limits apply: particles should move less than a cell per
+step, $h \lesssim \Delta x/|\mathbf{v}|_{\max}$, and elastic waves should not cross more than a cell per step, $h \lesssim
+\Delta x/c$ with wave speed $c = \sqrt{(\lambda + 2\mu)/\rho}$. For the jelly above ($E = 10^4$ Pa, $\nu = 0.3$, $\rho =
+1000$ kg/m$^3$), $c = 3.7$ m/s, so with $\Delta x = 1$ cm the step must be well under 2.7 ms; codes use a safety factor
+of about 0.5, about 1.4 ms. <a href="24-mpm.html">Chapter 24</a> has the details.</p>
+</div>
+
+<h3>Check your understanding</h3>
+<details><summary>1. In step 6, why use the new grid velocity rather than the old one?</summary>
+<p>Using $\mathbf{v}^{n+1}$ for both the $\mathbf{F}$ update and the particle advection, after computing the force from
+$\mathbf{F}^n$, is symplectic Euler: force from the old configuration, then positions (here, the configuration measured by
+$\mathbf{F}$) with the new velocity. Using the old velocity would be explicit Euler, which gains energy.</p>
+</details>
+<details><summary>2. Where does the MLS-MPM update put the stress, and why is no separate force loop needed?</summary>
+<p>The term $-\tfrac{4\Delta t}{\Delta x^2}V_p^0\mathbf{P}_p\mathbf{F}_p^T$ is added to $m_p\mathbf{C}_p$, so the stress
+enters as an extra affine momentum contribution that P2G spreads to the nodes. The force loop and the P2G loop have the
+same structure once $\nabla w_{ip}$ is replaced by $w_{ip}\mathbf{D}_p^{-1}(\mathbf{x}_i - \mathbf{x}_p)$, so they merge.</p>
+</details>
+
+<h2>Section 11: Implicit time integration</h2>
+
+<p>Second pass. Read with <a href="26-implicit-mpm.html">chapter 26</a>. Only the grid velocity update changes.</p>
+
+<h3>11.1 Force derivative, equations (191) to (198)</h3>
+
+<p>For Newton's method we need how the grid forces change when the grid nodes move. Perturb the moved positions by a
+small $\mathbf{u}_j$ at each node. From (193), the particle deformation gradient changes by</p>
+$$\delta\mathbf{F}_p = \sum_j\mathbf{u}_j(\nabla w_{jp})^T\mathbf{F}_p^n,$$
+<p>the stress by $\delta\mathbf{P}_p = \frac{\partial^2\Psi}{\partial\mathbf{F}\partial\mathbf{F}}:\delta\mathbf{F}_p =
+\mathbf{A}_p$ (197), and since (194) is linear in $\mathbf{P}$,</p>
+$$-\delta\mathbf{f}_i = \sum_j\frac{\partial^2e}{\partial\hat{\mathbf{x}}_i\partial\hat{\mathbf{x}}_j}\mathbf{u}_j = \sum_pV_p^0\mathbf{A}_p(\mathbf{F}_p^n)^T\nabla w_{ip}. \tag{196}$$
+<p>Read (196) as an algorithm: interpolate the node perturbations to a $\delta\mathbf{F}_p$ per particle (a G2P-like
+pass), apply the material's stress differential (section 6.3's $\delta\mathbf{P}$), and splat back like a force (a
+P2G-like pass). This is the "matrix-free" Hessian product that a Krylov solver needs; you never build the matrix.</p>
+
+<h3>11.2 to 11.4 Backward Euler, Newton, linearisation, equations (199) to (203)</h3>
+
+<p>Backward Euler evaluates the force at the end of the step (199):
+$\mathbf{v}_i^{n+1} = \mathbf{v}_i^n + \Delta t\,\mathbf{f}_i(\mathbf{x}^n + \Delta t\,\mathbf{v}^{n+1})/m_i$. Collected for
+all nodes, it is a nonlinear system (200):</p>
+$$\mathbf{h}(\mathbf{v}) = \mathbf{M}\mathbf{v} - \Delta t\,\mathbf{f}(\mathbf{x}^n + \Delta t\,\mathbf{v}) - \mathbf{M}\mathbf{v}^n = \mathbf{0}.$$
+<p>Newton's method (201) repeats $\mathbf{v}^{(k+1)} = \mathbf{v}^{(k)} - \big(\partial\mathbf{h}/\partial\mathbf{v}\big)^{-1}\mathbf{h}(\mathbf{v}^{(k)})$,
+and by the chain rule $\partial\mathbf{h}/\partial\mathbf{v} = \mathbf{M} + \Delta t^2\,\partial^2e/\partial\hat{\mathbf{x}}^2$: mass
+plus time step squared times the energy Hessian (11.1). Each Newton iteration recomputes every $\mathbf{F}_p$ from the
+current velocity guess, so keep $\mathbf{F}_p^n$ stored. The notes suggest MINRES for the linear solve; MINRES handles
+symmetric <i>indefinite</i> matrices, which you get when the energy is non-convex (see the warning below and
+<a href="09-linear-solvers.html">chapter 9</a>).</p>
+
+<p>Section 11.4's linearised update is dense on the page; spelled out, it reads: blend the end-of-step force,
+$\mathbf{v}_i^{n+1} = \mathbf{v}_i^n + \Delta t\,m_i^{-1}\big((1 - \beta)\mathbf{f}_i^n + \beta\mathbf{f}_i^{n+1}\big)$, and
+linearise $\mathbf{f}^{n+1} \approx \mathbf{f}^n + \sum_j\frac{\partial\mathbf{f}_i}{\partial\hat{\mathbf{x}}_j}\Delta
+t\,\mathbf{v}_j^{n+1}$. Rearranging,</p>
+$$\sum_j\Big(\delta_{ij}\mathbf{I} + \beta\,\Delta t^2m_i^{-1}\frac{\partial^2e^n}{\partial\hat{\mathbf{x}}_i\partial\hat{\mathbf{x}}_j}\Big)\mathbf{v}_j^{n+1} = \mathbf{v}_i^*,
+\qquad \mathbf{v}_i^* = \mathbf{v}_i^n + \Delta t\,m_i^{-1}\mathbf{f}_i^n. \tag{202, 203}$$
+<p>$\beta = 0$ is explicit, $\tfrac12$ trapezoidal, 1 backward Euler. Multiply row $i$ by $m_i$ and the matrix becomes
+$\mathbf{M} + \beta\Delta t^2\mathbf{H}$, symmetric, which is what "mass symmetric" means. The notes claim this equals one
+Newton step from a zero initial guess; check it: with $\mathbf{v}^{(0)} = \mathbf{0}$, $\mathbf{h}(\mathbf{0}) =
+-\Delta t\,\mathbf{f}^n - \mathbf{M}\mathbf{v}^n$ and the Jacobian is $\mathbf{M} + \Delta t^2\mathbf{H}(\mathbf{x}^n)$, so one
+Newton step solves $(\mathbf{M} + \Delta t^2\mathbf{H})\mathbf{v} = \mathbf{M}\mathbf{v}^n + \Delta t\,\mathbf{f}^n$, which is
+(202) with $\beta = 1$.</p>
+
+<h3>11.5 The optimisation integrator, equations (204) and (205)</h3>
+
+<p>The notes claim that solving (204) is equivalent to minimising</p>
+$$E(\mathbf{v}) = \sum_i\tfrac12m_i\|\mathbf{v}_i - \mathbf{v}_i^n\|^2 + e(\mathbf{x}^n + \Delta t\,\mathbf{v}). \tag{205}$$
+<p>Proof in one line: the gradient with respect to $\mathbf{v}_i$ is $m_i(\mathbf{v}_i - \mathbf{v}_i^n) + \Delta t\,\partial
+e/\partial\hat{\mathbf{x}}_i = m_i(\mathbf{v}_i - \mathbf{v}_i^n) - \Delta t\,\mathbf{f}_i = \mathbf{h}_i(\mathbf{v})$. So
+stationary points of $E$ are exactly backward Euler solutions, and the Hessian of $E$ is the Newton matrix above. Why this
+helps: an optimisation problem lets Newton's method use a line search (never accept a step that increases $E$), which
+makes it converge from any starting guess and at large time steps. The catch: the Newton direction is only guaranteed to
+go downhill if the Hessian is positive definite, so practical codes modify it (project each particle's
+$\partial^2\Psi/\partial\mathbf{F}^2$ to its positive part). That definiteness fix is the pitfall the PB-MPM paper cites
+via Smith et al. (2019).</p>
+
+<div class="warning">
+<p><b>Non-convex energies make the Hessian indefinite.</b> Fixed corotated and neo-Hookean are not convex in $\mathbf{F}$
+(compression past inversion, buckling). Then $\mathbf{M} + \Delta t^2\mathbf{H}$ can have negative eigenvalues at large
+$\Delta t$, CG can fail, and an unmodified Newton step can go uphill. This is the main source of complexity in implicit
+MPM, and the reason PB-MPM exists.</p>
+</div>
+
+<h3>Check your understanding</h3>
+<details><summary>1. What does a semi-implicit step ($\beta = 1$, one linear solve) give up compared with full Newton?</summary>
+<p>It linearises the force around the start of the step, so for large deformations within one step the force is wrong;
+it can still blow up at large $\Delta t$ for strongly nonlinear materials. Full Newton with a line search on (205) iterates
+until the true backward Euler equations hold.</p>
+</details>
+<details><summary>2. Why is backward Euler "stable" but still damped?</summary>
+<p>The same reason as for one spring in <a href="03-time-integration.html">chapter 3</a>: each mode's amplitude shrinks by
+about $1/(1 + \Delta t^2\omega^2)$ per step. The stiffest modes, which explicit methods cannot handle, are simply damped
+out.</p>
+</details>
+
+<h2>Section 12: More topics</h2>
+
+<h3>12.1 Collision objects</h3>
+
+<p>Collisions are applied to grid velocities right after forces (and optionally to particle velocities before
+advection). The recipe, which is chapter <a href="15-contact-friction.html">15</a>'s Coulomb friction on velocities: with
+object velocity $\mathbf{v}_{co}$ and normal $\mathbf{n}$ from a level set $\phi$,</p>
+<ol>
+<li>$\mathbf{v}_{\text{rel}} = \mathbf{v} - \mathbf{v}_{co}$, $v_n = \mathbf{v}_{\text{rel}}\cdot\mathbf{n}$. If $v_n \ge 0$
+the bodies separate: do nothing.</li>
+<li>$\mathbf{v}_t = \mathbf{v}_{\text{rel}} - v_n\mathbf{n}$. If $\|\mathbf{v}_t\| \le -\mu_kv_n$, stick:
+$\mathbf{v}_{\text{rel}}' = \mathbf{0}$.</li>
+<li>Otherwise slide: $\mathbf{v}_{\text{rel}}' = \mathbf{v}_t + \mu_kv_n\,\mathbf{v}_t/\|\mathbf{v}_t\|$ (the tangential speed
+drops by $\mu_k|v_n|$).</li>
+<li>$\mathbf{v}' = \mathbf{v}_{\text{rel}}' + \mathbf{v}_{co}$.</li>
+</ol>
+<p>The section also covers moving level sets and "sticky" collisions for overhangs; skim.</p>
+
+<h3>12.2 Lagrangian forces, equation (206)</h3>
+
+<p>Almost word for word the APIC paper's section 7; see <a href="28-reading-apic.html">chapter 28</a> for the derivation.</p>
+
+<h2>What the notes do not tell you</h2>
+<ul>
+<li><b>The time-step limit</b> for explicit MPM (see the warning in section 10).</li>
+<li><b>How to initialise particles</b>: the usual choice is 2 by 2 (2D) or 2 by 2 by 2 (3D) particles per cell, each
+with $V_p^0 = \Delta x^d/\text{count}$ and $m_p = \rho V_p^0$.</li>
+<li><b>MLS-MPM</b>, which arrived two years later and is now the default in compact codes (worked through above).</li>
+<li><b>Sand.</b> The notes mention Drucker-Prager only in passing; the model is in Klár et al. 2016
+(<a href="25-plasticity.html">chapter 25</a>).</li>
+<li><b>Robust implicit solvers.</b> Definiteness fixes and line searches are pointed to (Gast et al. 2015) but not
+described.</li>
+</ul>
+
+<h2>A runnable check</h2>
+
+<p>The page below checks four claims of the notes numerically on a random case: (48) and (52) against finite
+differences of (46) and (49); the grid force (189) against a finite-difference gradient of the energy (164); and that the
+forces have zero total force and zero total torque. Press "new random case" a few times. The arrows are the grid forces
+on a handful of randomly deformed particles.</p>
+
+<div class="demo" data-src="29-reading-mpm-course/checks.js" data-height="460"
+     data-caption="Numerical checks of equations (48), (52), (169)/(189) and momentum conservation."></div>
+
+<h2>Exercises</h2>
+
+<div class="exercise">
+<h4>derive and verify a stress</h4>
+<p>Derive $\mathbf{P}$ for the 2D "St. Venant-Kirchhoff" energy $\Psi = \mu\|\mathbf{E}\|_F^2 +
+\tfrac\lambda2(\operatorname{tr}\mathbf{E})^2$ with $\mathbf{E} = \tfrac12(\mathbf{F}^T\mathbf{F} - \mathbf{I})$, then add it to
+the check page as a fifth test and confirm your formula against finite differences.</p>
+</div>
+<details class="hint"><summary>Answer</summary>
+<p>$\mathbf{P} = \mathbf{F}\big(2\mu\mathbf{E} + \lambda\operatorname{tr}(\mathbf{E})\mathbf{I}\big)$. Use $\delta\mathbf{E} =
+\tfrac12(\delta\mathbf{F}^T\mathbf{F} + \mathbf{F}^T\delta\mathbf{F})$ and the symmetry of the bracket.</p>
+</details>
+
+<div class="exercise">
+<h4>the eight steps from memory</h4>
+<p>Close the notes. In your chapter-24 code, rewrite the explicit step from the list in section 10.5 without looking,
+using APIC transfers and fixed corotated stress. Then switch to the MLS-MPM form derived above and check that the two
+versions give visibly the same motion for a falling jelly block, while the MLS version runs with one fewer pass over the
+particles.</p>
+</div>
+
+<div class="exercise">
+<h4>one Newton step</h4>
+<p>In your chapter-26 code, implement (202) with $\beta = 1$ using CG and the matrix-free product (196). Find the
+largest time step at which explicit MPM stays stable for your jelly, then run the semi-implicit version at ten times that
+step. Predict before running: will it be stable? Will it look the same?</p>
+</div>
+<details class="hint"><summary>What to expect</summary>
+<p>Usually stable for moderate deformation, visibly more damped (backward Euler's numerical damping), and occasionally
+unstable when particles invert or compress strongly within one step, because the linearisation is then poor and the
+Hessian indefinite.</p>
+</details>
+
+<div class="exercise">
+<h4>break the force on purpose</h4>
+<p>In the check page's code, replace $\mathbf{P}\mathbf{F}^T$ by $\mathbf{P}$ in the force. Which tests fail, and by how
+much for a 10 % stretch? Then explain, using section 9, which integral you are now evaluating.</p>
+</div>
+
+<h2>Further reading</h2>
+<ul>
+<li>Stomakhin, Schroeder, Chai, Teran, Selle, <i>A material point method for snow simulation</i>, SIGGRAPH 2013: the
+paper behind sections 6.5 and 10.</li>
+<li>Jiang, Schroeder, Selle, Teran, Stomakhin, <i>The affine particle-in-cell method</i>, SIGGRAPH 2015
+(<a href="28-reading-apic.html">chapter 28</a>).</li>
+<li>Gast, Schroeder, Stomakhin, Jiang, Teran, <i>Optimization integrator for large time steps</i>, IEEE TVCG 2015:
+section 11.5 in full, with line search and definiteness fixes.</li>
+<li>Klár, Gast, Pradhana, Fu, Schroeder, Jiang, Teran, <i>Drucker-Prager elastoplasticity for sand animation</i>,
+SIGGRAPH 2016: the principled plasticity the notes point to.</li>
+<li>Fu, Guo, Gast, Jiang, Teran, <i>A polynomial particle-in-cell method</i>, SIGGRAPH Asia 2017: richer transfers than
+APIC.</li>
+<li>Hu, Fang, Ge, Qu, Zhu, Pradhana, Jiang, <i>A moving least squares material point method with displacement
+discontinuity and two-way rigid body coupling</i>, SIGGRAPH 2018: MLS-MPM.</li>
+<li>Smith, de Goes, Kim, <i>Analytic eigensystems for isotropic distortion energies</i>, ACM TOG 2019: closed-form
+eigenvalues for definiteness fixes in implicit solvers.</li>
+<li>Macklin, Müller, Chentanez, <i>XPBD</i>, MIG 2016: the constraint-based alternative to section 11 that PB-MPM
+adapts (<a href="07-xpbd.html">chapter 7</a>).</li>
+<li>Bonet and Wood, <i>Nonlinear Continuum Mechanics for Finite Element Analysis</i>, Cambridge University Press: the
+book sections 5 to 7 follow.</li>
+</ul>
+
+<h2>Summary</h2>
+<ul>
+<li>Sections 5 to 7 build continuum mechanics: $\mathbf{F} = \partial\mathbf{x}/\partial\mathbf{X}$,
+$\dot{\mathbf{F}} = (\nabla\mathbf{v})\mathbf{F}$, $\dot J = J\nabla\cdot\mathbf{v}$, Nanson's formula, and the two stresses
+related by $\mathbf{P} = J\boldsymbol\sigma\mathbf{F}^{-T}$.</li>
+<li>The weak form moves the derivative off the stress onto test functions; with grid basis functions, a lumped mass
+matrix and particles as quadrature points it gives $\mathbf{f}_i = -\sum_pV_p^0\mathbf{P}_p\mathbf{F}_p^T\nabla w_{ip}$.</li>
+<li>The same force is minus the gradient of $\sum_pV_p^0\Psi(\mathbf{F}_p(\hat{\mathbf{x}}))$ with respect to imagined node
+positions, which is the bridge to implicit MPM.</li>
+<li>Explicit MPM is eight steps: P2G, grid velocity, active nodes, forces, grid update with collisions, $\mathbf{F}$
+update, G2P, advect. MLS-MPM fuses the force into P2G.</li>
+<li>Implicit MPM solves $\mathbf{M}\mathbf{v} - \Delta t\,\mathbf{f}(\mathbf{x}^n + \Delta t\,\mathbf{v}) = \mathbf{M}\mathbf{v}^n$ with
+Newton; it is equivalent to minimising (205), which makes line searches possible but needs definiteness fixes.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Derive $\dot{\mathbf{F}} = (\nabla\mathbf{v})\mathbf{F}$ in two lines.</li>
+<li>Why does the MPM force use $\mathbf{P}\mathbf{F}^T$ and the rest volume $V_p^0$, rather than $\mathbf{P}$, or
+$\boldsymbol\sigma$ and $V_p^0$?</li>
+<li>For $\mathbf{F} = \operatorname{diag}(1.1, 1)$, $\mu = 3846$ Pa and Lamé $\lambda = 5769$ Pa, compute the fixed corotated
+$\mathbf{P}$ and $\boldsymbol\sigma$. (Answer: $\mathbf{P} = \operatorname{diag}(1346, 635)$ Pa, $\boldsymbol\sigma =
+\operatorname{diag}(1346, 577)$ Pa.)</li>
+<li>Show that one Newton step from $\mathbf{v} = \mathbf{0}$ on the backward Euler system is the semi-implicit update
+(202).</li>
+<li>What does mass lumping replace, and why is the lumped mass the same as the P2G mass?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

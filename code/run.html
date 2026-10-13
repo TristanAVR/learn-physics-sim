@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulation</title>
+<link rel="stylesheet" href="lib/sandbox.css">
+</head>
+<body>
+<script src="lib/sandbox.js"></script>
+<script>
+  // Runs one simulation script: run.html?src=03-time-integration/solution.js
+  // The path is relative to this folder; only local files under code/ are allowed.
+  (function () {
+    const src = new URLSearchParams(location.search).get('src') || '';
+    if (!/^[\w\-\/]+\.js$/.test(src) || src.includes('..')) {
+      document.body.textContent = 'Pass ?src=<chapter>/<file>.js, e.g. ?src=03-time-integration/solution.js';
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = src;
+    s.onerror = () => { document.body.textContent = 'Could not load ' + src; };
+    document.body.appendChild(s);
+  })();
+</script>
+</body>
+</html>

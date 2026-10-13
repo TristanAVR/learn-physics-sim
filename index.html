@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learn Physics Simulation</title>
+<meta name="description" content="Learn to write physics simulations from first principles: integrators, constraints, PBD and XPBD, rods, contact, soft bodies, and the Material Point Method with APIC and PB-MPM.">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="assets/chapters.js"></script>
+<script defer src="assets/site.js"></script>
+</head>
+<body data-chapter="" data-root=".">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Learn Physics Simulation</h1>
+<p class="subtitle">From $F = ma$ to the Material Point Method, one runnable idea at a time.</p>
+
+<p>This site teaches you to write physics simulations yourself. It starts with a single falling particle and ends with
+the methods behind modern snow, sand and fluid effects: the Affine Particle-In-Cell method, the Material Point Method
+and Position-Based MPM. On the way you will build ropes, rods that bend and twist, cable-driven tentacles, contact with
+friction, cloth, inflated bodies and muscles.</p>
+
+<p>Every chapter works the same way. It introduces one idea: what problem it solves, the physics behind it and the
+maths you need, with small code snippets. Then it hands the keyboard to you. Each chapter comes with a
+<b>starter file</b> that runs in your browser but is missing the interesting part, and an <b>exercise</b> that asks you
+to fill it in. A reference solution is there when you need it, the same way
+<a href="https://learnopengl.com" rel="noopener">LearnOpenGL</a> teaches graphics.</p>
+
+<div class="note">
+<p><b>You will understand three papers by the end.</b> The last part walks through
+<i>The Affine Particle-In-Cell Method</i> (Jiang et al., SIGGRAPH 2015),
+<i>The Material Point Method for Simulating Continuum Materials</i> (Jiang et al., SIGGRAPH 2016 course) and
+<i>A Position Based Material Point Method</i> (Lewin, SIGGRAPH 2024 talk), section by section. Every idea they rely on
+is built earlier in the site, and the MPM chapters point out where each paper says the same thing in its own notation.</p>
+</div>
+
+<h2>What you need</h2>
+<ul>
+<li><b>A browser and a text editor.</b> Everything runs as plain JavaScript in the browser: no install, no build step.
+Clone or download the site, open <code>code/run.html?src=03-time-integration/starter.js</code>, edit the starter, and
+refresh.</li>
+<li><b>Some programming.</b> If you can write a loop and a function in any C-like language, you can follow along. The
+code is deliberately plain so it ports easily to C#, C++ or Python.</li>
+<li><b>High-school maths, plus a willingness to meet more.</b> Vectors and derivatives are enough to start. Matrices,
+partial derivatives and a little linear algebra come in gradually, each explained when it first appears.</li>
+</ul>
+
+<h2>How to use this site</h2>
+<ol>
+<li><b>Read the chapter</b> and run its demo. Play with the sliders before reading the maths; a feel for what happens
+makes the equations easier.</li>
+<li><b>Predict before you run.</b> Each exercise asks you to guess what will happen first. Write the guess down; the
+surprises are where the learning is.</li>
+<li><b>Write the code yourself.</b> Open the starter, find the <code>TODO</code>s, and make the demo work. Use the
+hints only when stuck for a while, and the solution only to compare after you have something working.</li>
+<li><b>Come back.</b> The short questions at the end of each chapter are worth answering again a few days later, from
+memory. Recalling an idea is what makes it stick.</li>
+</ol>
+
+<h2>Contents</h2>
+<div id="toc"></div>
+</article>
+<footer>The papers discussed belong to their authors and publishers; this site
+summarises and explains them, and links to the originals.</footer>
+</main>
+</body>
+</html>
