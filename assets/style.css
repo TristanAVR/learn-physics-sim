@@ -148,3 +148,20 @@ footer { margin: 4em auto 0; max-width: 780px; color: var(--muted); font: 13px s
 .compare td, .compare th { text-align: center; }
 .compare td:first-child, .compare th:first-child { text-align: left; }
 .deeper { border-left: 4px solid var(--rule); }
+
+/* Puzzles (site.js setupPuzzles) */
+.puzzle { margin: 1.6em 0; padding: 12px 18px; border: 1px solid var(--rule); border-left: 4px solid var(--warn-rule); border-radius: 0 6px 6px 0; }
+.puzzle > :first-child { margin-top: 0; }
+.puzzle h4::before { content: "Puzzle: "; color: var(--warn-rule); }
+.puzzle.solved { border-left-color: var(--ex-rule); }
+.puzzle.solved h4::after { content: "  \2713 solved"; color: var(--ex-rule); font-weight: 600; font-size: 0.85em; }
+.puzzle-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0.8em 0 0.3em; font: 15px system-ui, sans-serif; }
+.puzzle-form input[type=text] { width: 9em; padding: 5px 8px; font: inherit; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg); color: var(--text); }
+.puzzle-unit { color: var(--muted); }
+.puzzle-choice { margin-right: 10px; cursor: pointer; }
+.puzzle-check, .puzzle-reveal { font: 600 14px system-ui, sans-serif; padding: 5px 12px; border-radius: 4px; cursor: pointer; border: 1px solid var(--rule); background: var(--code-bg); color: var(--text); }
+.puzzle-feedback { min-height: 1.3em; font: 14px system-ui, sans-serif; color: var(--muted); }
+.puzzle-feedback.ok { color: var(--ex-rule); font-weight: 600; }
+.puzzle-feedback.no { color: var(--warn-rule); }
+.puzzle .worked { margin-top: 0.8em; padding-top: 0.6em; border-top: 1px dashed var(--rule); }
+.puzzle .worked::before { content: "Worked solution"; display: block; font: 600 0.85em system-ui, sans-serif; color: var(--muted); margin-bottom: 0.3em; }

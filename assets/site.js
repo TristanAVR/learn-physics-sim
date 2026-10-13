@@ -107,11 +107,111 @@
     if (t) t.addEventListener('click', () => body.classList.toggle('menu-open'));
   }
 
+  // Puzzles. Markup (see AUTHORING.md):
+  //   <div class="puzzle" id="p-scale" data-answer="2452" data-tol="0.02" data-unit="N/m">
+  //     <h4>title</h4> <p>scenario ...</p>
+  //     <details class="hint"><summary>Hint 1</summary>...</details> ...
+  //     <div class="worked">worked solution</div>
+  //   </div>
+  // Multiple choice: data-choices="Yes|No" data-answer="No". The worked solution opens when the answer is right,
+  // or on request after a first attempt. Solved puzzles are remembered in this browser only.
+  function storageGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function storageSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode: no memory */ } }
+
+  function parseNumber(s) {
+    const cleaned = String(s).replace(/,/g, '').replace(/−/g, '-').replace(/\s+/g, ' ').trim();
+    const m = cleaned.match(/[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?/i);
+    return m ? parseFloat(m[0]) : NaN;
+  }
+
+  function judge(value, answer, tol) {
+    if (!isFinite(value)) return { ok: false, invalid: true, msg: 'Enter a number first.' };
+    if (answer === 0) return { ok: Math.abs(value) <= tol, msg: '' };
+    const ratio = value / answer;
+    if (Math.abs(ratio - 1) <= tol) return { ok: true, msg: '' };
+    if (ratio < 0) return { ok: false, msg: 'Not yet: check the sign.' };
+    const decades = Math.log10(ratio);
+    if (Math.abs(decades - Math.round(decades)) < 0.05 && Math.round(decades) !== 0) {
+      return { ok: false, msg: `Not yet, but you are off by a factor of ${Math.pow(10, Math.abs(Math.round(decades)))}: check your units (cm or m? g or kg? ms or s?).` };
+    }
+    return { ok: false, msg: ratio > 1 ? 'Not yet: your answer is too high.' : 'Not yet: your answer is too low.' };
+  }
+
+  function setupPuzzles() {
+    const pageKey = 'puzzle:' + (current || location.pathname) + ':';
+    let n = 0;
+    for (const pz of document.querySelectorAll('.puzzle')) {
+      const id = pageKey + (pz.id || 'p' + n++);
+      const worked = pz.querySelector('.worked');
+      const firstHint = pz.querySelector('details');
+      const form = document.createElement('div');
+      form.className = 'puzzle-form';
+      const choices = pz.dataset.choices ? pz.dataset.choices.split('|') : null;
+      let input = null;
+      if (choices) {
+        form.innerHTML = choices.map((c, i) =>
+          `<label class="puzzle-choice"><input type="radio" name="${id}" value="${c.replace(/"/g, '&quot;')}"> ${c}</label>`).join('');
+      } else {
+        form.innerHTML = `<input type="text" inputmode="decimal" autocomplete="off" aria-label="Your answer"> <span class="puzzle-unit">${pz.dataset.unit || ''}</span>`;
+        input = form.querySelector('input');
+      }
+      const check = document.createElement('button');
+      check.className = 'puzzle-check';
+      check.textContent = 'Check';
+      form.appendChild(check);
+      const reveal = document.createElement('button');
+      reveal.className = 'puzzle-reveal';
+      reveal.textContent = 'Show the worked solution';
+      reveal.hidden = true;
+      form.appendChild(reveal);
+      const feedback = document.createElement('div');
+      feedback.className = 'puzzle-feedback';
+      feedback.setAttribute('aria-live', 'polite');
+      if (firstHint) pz.insertBefore(form, firstHint); else if (worked) pz.insertBefore(form, worked); else pz.appendChild(form);
+      form.after(feedback);
+      if (worked) worked.hidden = true;
+
+      const solved = () => {
+        pz.classList.add('solved');
+        feedback.textContent = 'Correct.' + (worked ? ' Compare your reasoning with the worked solution.' : '');
+        feedback.className = 'puzzle-feedback ok';
+        if (worked) worked.hidden = false;
+        reveal.hidden = true;
+        storageSet(id, '1');
+      };
+      check.addEventListener('click', () => {
+        let res;
+        if (choices) {
+          const picked = form.querySelector('input:checked');
+          if (!picked) { feedback.textContent = 'Pick an answer first.'; feedback.className = 'puzzle-feedback'; return; }
+          res = { ok: picked.value === pz.dataset.answer, msg: 'Not yet. Try a hint, or think about it once more.' };
+        } else {
+          res = judge(parseNumber(input.value), parseFloat(pz.dataset.answer), parseFloat(pz.dataset.tol || '0.02'));
+        }
+        if (res.ok) { solved(); return; }
+        feedback.textContent = res.msg;
+        feedback.className = 'puzzle-feedback no';
+        if (worked && !res.invalid) reveal.hidden = false;
+      });
+      if (input) {
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') check.click(); });
+        input.addEventListener('input', () => { feedback.textContent = ''; feedback.className = 'puzzle-feedback'; });
+      }
+      reveal.addEventListener('click', () => { if (worked) worked.hidden = false; reveal.hidden = true; });
+      if (storageGet(id) === '1') {
+        pz.classList.add('solved');
+        feedback.textContent = 'You solved this one before. Try it again from memory.';
+        feedback.className = 'puzzle-feedback';
+      }
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     buildSidebar();
     buildToc();
     buildPager();
     embedDemos();
+    setupPuzzles();
     renderMath();
     highlight();
     sidebarToggle();

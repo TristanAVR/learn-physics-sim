@@ -92,6 +92,27 @@ reference implementation.
    major idea add a short `<div class="check">` question with a collapsible answer.
 10. **Several routes to hard results.** If the standard proof needs tools the reader may lack (eigenvalues), give an
     elementary route first (expand and cancel; a discriminant) and the standard route as "Going deeper".
+11. **Puzzles: apply it to the real world.** After the worked examples and before the coding exercise, add a
+    `<h2>Puzzles</h2>` section of 5-9 puzzles. Each is a different everyday situation (a scale, a car, a bow, a game
+    bug report) with realistic numbers, needing the chapter's idea plus a step or two of reasoning, not a lookup.
+    Vary the contexts on purpose (it is what makes the idea transfer), include at least one "which method / what
+    went wrong" puzzle, and end with a `<div class="check">` that asks what the puzzles had in common, or that mixes
+    in an earlier chapter's idea. Compute every answer before publishing.
+
+    ```html
+    <div class="puzzle" id="unique-id" data-answer="2452.5" data-tol="0.02" data-unit="N/m">
+      <h4>short title</h4>
+      <p>the situation, with numbers and units</p>
+      <details class="hint"><summary>Hint 1</summary><p>which idea applies</p></details>
+      <details class="hint"><summary>Hint 2</summary><p>the set-up, almost the answer</p></details>
+      <div class="worked"><p>full solution, and what the number means in the real world</p></div>
+    </div>
+    ```
+
+    `data-tol` is relative (0.02 = 2 %; `0` means exact). Multiple choice: `data-choices="A|B|C" data-answer="B"`.
+    The site adds the answer box, the feedback (including a units nudge when an answer is off by a power of ten) and
+    unlocks the worked solution after the first attempt. A puzzle may be followed by a demo the reader uses to check
+    their answer (see the bungee puzzle in chapter 03).
 
 ## 5. Code
 
@@ -108,7 +129,7 @@ global `Sim`. It runs at `code/run.html?src=<id>/<file>.js`.
 - SI units in the code (metres, kilograms, seconds). Gravity 9.81 m/s^2 downward (y is up in the sandbox).
 - Deterministic: use `Sim.random(seed)` instead of `Math.random()`.
 - Performance: the demo should run at 60 fps on a laptop. For particles in the thousands use flat `Float64Array`s
-  and `g.points(...)`. Keep MPM grids around 63-128 cells across and particle counts to a few thousand.
+  and `g.points(...)`. Keep MPM grids around 64-128 cells across and particle counts to a few thousand.
 
 ### Sandbox API (`code/lib/sandbox.js`)
 
