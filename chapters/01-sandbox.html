@@ -72,7 +72,7 @@ values here, so a reset always gives the same starting point.</li>
 <li><b><code>step(dt)</code></b> moves the world forward by <code>dt</code> seconds. This is where all the physics goes.
 It must not draw anything, and it should not depend on how often the screen refreshes: the sandbox calls it with a
 fixed <code>dt</code> (1/60 s unless you choose otherwise), which, as you will see in the
-<a href="03-time-integration.html">Time Integration</a> chapter, matters a great deal.</li>
+<a href="04-time-integration.html">Time Integration</a> chapter, matters a great deal.</li>
 <li><b><code>draw(g)</code></b> draws the world as it is now. It is called every frame, including while paused, so it
 must not change the state.</li>
 </ul>

@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stress and Hyperelasticity · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="22-hyperelasticity" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Stress and Hyperelasticity</h1>
+<p class="subtitle">From "how deformed is it?" to "how hard does it push back?", with one energy function per material.</p>
+
+<p>The last chapter gave every point of a material its deformation gradient $\mathbf{F}$. That tells us the shape of
+the material, but not what it does about it. A rubber block that has been squashed wants to spring back; a block of
+dough mostly does not. The rule that turns deformation into force is called the <b>constitutive model</b>, and it is
+where a simulator decides what material it is simulating.</p>
+
+<p>For elastic materials there is a clean way to write that rule. Choose a function that says how much energy is stored
+per unit of rest volume for a given $\mathbf{F}$. Its derivative is the stress, and the derivative of the total energy
+with respect to the node positions is the force. Everything else follows. This chapter builds four such functions,
+shows you where each one breaks, and then uses them in a small finite element jelly block. The force formula you derive
+for a triangle has exactly the same shape as the one MPM uses for a particle, so by the end you will already understand
+half of an MPM step.</p>
+
+<h2>Energy first</h2>
+
+<p>A spring stores energy $\tfrac12 k (\ell - \ell_0)^2$ and its force is minus the derivative of that energy. A
+continuum does the same thing point by point. The <b>strain energy density</b> $\Psi(\mathbf{F})$ is the elastic energy
+stored per unit rest volume (J/m&sup3;, which is the same unit as pascals) when the neighbourhood has deformation
+gradient $\mathbf{F}$. Materials whose elastic behaviour comes entirely from such a function are called
+<b>hyperelastic</b>. The total elastic energy of a body is the integral over its rest shape,</p>
+
+$$\mathcal{E} = \int_{\Omega^0} \Psi(\mathbf{F}(X))\, dX \;\approx\; \sum_e V^0_e\, \Psi(\mathbf{F}_e),$$
+
+<p>where the sum runs over elements (triangles here, particles in MPM) with rest volumes $V^0_e$. In 2D we simulate a
+slab one metre thick, so a rest area in m&sup2; is also a volume in m&sup3; and all the usual units carry over.</p>
+
+<p>What makes a good $\Psi$? It should be zero at rest, $\Psi(\mathbf{I}) = 0$. It must not change when the deformed
+material is rotated afterwards, $\Psi(\mathbf{R}\mathbf{F}) = \Psi(\mathbf{F})$ for every rotation $\mathbf{R}$: turning
+a squashed block around does not squash it more. This is called <b>frame indifference</b> or objectivity, and the
+previous chapter's warning about small strain was really about it. Most of the materials we want are also
+<b>isotropic</b>, responding the same way whichever direction you pull, which means
+$\Psi(\mathbf{F}\mathbf{Q}) = \Psi(\mathbf{F})$ for rotations $\mathbf{Q}$ of the rest shape. Finally, a robust model
+should resist being crushed to zero area, and ideally cope when a simulation inverts an element anyway.</p>
+
+<h2>Stress is the derivative of energy</h2>
+
+<p>The <b>first Piola-Kirchhoff stress</b> is the derivative of the energy density with respect to $\mathbf{F}$:</p>
+
+$$\mathbf{P} = \frac{\partial \Psi}{\partial \mathbf{F}}, \qquad P_{ij} = \frac{\partial \Psi}{\partial F_{ij}}.$$
+
+<p>This is a 2&times;2 matrix of partial derivatives: entry $(i, j)$ says how fast the energy grows when you nudge
+$F_{ij}$. For a feel of what it means, take a bar in 1D with $\Psi = \tfrac12 k (F - 1)^2$; then $P = k(F - 1)$, which is
+Hooke's law with $F - 1$ the strain. In general $\mathbf{P}$ is a force per unit <i>rest</i> area: a small surface in
+the rest material with unit normal $N$ and area $dS$ feels the force $\mathbf{P} N\, dS$ from the material on its other
+side.</p>
+
+<p>Engineers more often quote the <b>Cauchy stress</b> $\boldsymbol\sigma$, the true force per unit <i>current</i> area.
+The two are related by Nanson's formula from the last chapter, $n\,ds = J\mathbf{F}^{-\mathsf{T}}N\,dS$, which gives</p>
+
+$$\boldsymbol\sigma = \frac{1}{J}\,\mathbf{P}\,\mathbf{F}^\mathsf{T}.$$
+
+<p>Both are in pascals. $\boldsymbol\sigma$ is always symmetric, $\mathbf{P}$ usually is not. Simulators that think in
+the rest shape (finite elements, and MPM's energy-based forces) use $\mathbf{P}$; pressure in a fluid is
+$\boldsymbol\sigma = -p\,\mathbf{I}$.</p>
+
+<h2>Forces are the negative gradient of energy</h2>
+
+<p>Given positions for all the nodes, we can compute every $\mathbf{F}_e$ and so the total energy $\mathcal{E}(x)$. The
+elastic force on node $a$ is</p>
+
+$$f_a = -\frac{\partial \mathcal{E}}{\partial x_a},$$
+
+<p>exactly as for springs. Let us work it out for one linear triangle, because it is short and because MPM does the
+same calculation. We need one piece of notation: the <b>double contraction</b> of two matrices,
+$\mathbf{A} : \mathbf{B} = \sum_{ij} A_{ij} B_{ij}$, the sum of the products of matching entries. With it, the chain
+rule for a function of a matrix reads $d\Psi = \mathbf{P} : d\mathbf{F}$, which is just "sum over all entries of
+(derivative times change)".</p>
+
+<p>For a triangle, $\mathbf{F} = \mathbf{D}_s\mathbf{D}_m^{-1}$, and only $\mathbf{D}_s$ (the current edge vectors) depends
+on the node positions. So</p>
+
+$$d\mathcal{E}_e = V^0\, \mathbf{P} : d\mathbf{F} = V^0\, \mathbf{P} : \left(d\mathbf{D}_s\, \mathbf{D}_m^{-1}\right)
+= V^0 \left(\mathbf{P}\,\mathbf{D}_m^{-\mathsf{T}}\right) : d\mathbf{D}_s.$$
+
+<p>The last step uses the identity $\mathbf{A} : (\mathbf{B}\mathbf{C}) = (\mathbf{A}\mathbf{C}^\mathsf{T}) : \mathbf{B}$,
+which you can check by writing out the sums. Now $d\mathbf{D}_s$ has columns $dx_1 - dx_0$ and $dx_2 - dx_0$. Call
+$\mathbf{H} = -V^0\,\mathbf{P}\,\mathbf{D}_m^{-\mathsf{T}}$; then $d\mathcal{E}_e = -\mathbf{H} : d\mathbf{D}_s$, and
+reading off the coefficients of $dx_1$, $dx_2$ and $dx_0$:</p>
+
+$$f_1 = \mathbf{H}_{:,1}, \qquad f_2 = \mathbf{H}_{:,2}, \qquad f_0 = -f_1 - f_2.$$
+
+<p>The forces on vertices 1 and 2 are the two columns of $\mathbf{H}$, and vertex 0 balances them, so a triangle never
+pushes itself along. In code, with $\mathbf{D}_m^{-1}$ precomputed per triangle:</p>
+
+<pre><code class="language-js">// H = -V0 P Dm^-T;  (P Dm^-T)_ij = sum_k P_ik (Dm^-1)_jk
+const H00 = -V0 * (P[0] * m00 + P[1] * m01), H01 = -V0 * (P[0] * m10 + P[1] * m11);
+const H10 = -V0 * (P[2] * m00 + P[3] * m01), H11 = -V0 * (P[2] * m10 + P[3] * m11);
+fx[i1] += H00; fy[i1] += H10;           // first column  -> vertex 1
+fx[i2] += H01; fy[i2] += H11;           // second column -> vertex 2
+fx[i0] -= H00 + H01; fy[i0] -= H10 + H11;</code></pre>
+
+<p>A derivation like this is easy to get subtly wrong, so the demo's forces were checked against a finite-difference
+gradient of the total energy: for all four models below they agree to about one part in a billion.</p>
+
+<div class="note">
+<p><b>This is MPM's force formula.</b> The columns of $\mathbf{D}_m^{-\mathsf{T}}$ are the rest-space gradients
+$\nabla_X N_1$, $\nabla_X N_2$ of the triangle's linear shape functions, so each vertex force is
+$f_a = -V^0\,\mathbf{P}\,\nabla_X N_a$. MPM replaces the triangle's shape functions with the grid's interpolation weights
+$w_{ip}$ and the triangle with a particle. Its weights are written in world space, and the chain rule converts:
+$\nabla_X w = \mathbf{F}^\mathsf{T}\nabla_x w$. The result is the force on grid node $i$,</p>
+$$f_i = -\sum_p V^0_p\, \mathbf{P}_p\, \mathbf{F}_p^\mathsf{T}\, \nabla w_{ip},$$
+<p>which is eq. (189) of the MPM course notes. You will implement it in the <a href="25-mpm.html">Material Point
+Method</a> chapter; it is the same three lines with a different sum.</p>
+</div>
+
+<div class="demo" data-src="22-hyperelasticity/solution.js" data-height="540"
+     data-caption="A finite element jelly block. Pick a material model; drag with the mouse; 'spin' and 'slam' are the two stress tests. Colour shows J: blue compressed, red stretched, purple inverted."></div>
+
+<p>The block is 0.8 m by 0.4 m, cut into 256 triangles, with density 1000 kg/m&sup3;. It is integrated with symplectic
+Euler and as many substeps per frame as explicit stability requires: the fastest elastic wave, with speed
+$c = \sqrt{(\lambda + 2\mu)/\rho}$, must not cross a triangle within one substep. The readout shows the count; at the
+default settings $c$ = 16.4 m/s and the frame needs 28 substeps. Now the models.</p>
+
+<h2>Lamé parameters</h2>
+
+<p>Every model below has two stiffness parameters, the <b>Lamé parameters</b> $\mu$ and $\lambda$. Both are in
+pascals. $\mu$ is the <b>shear modulus</b>: resistance to changing shape. $\lambda$ adds resistance to changing volume.
+Materials are usually described instead by <b>Young's modulus</b> $E$ (how stiff a bar is when pulled) and
+<b>Poisson's ratio</b> $\nu$ (how much it thins sideways when stretched), and the conversion is</p>
+
+$$\mu = \frac{E}{2(1 + \nu)}, \qquad \lambda = \frac{E\,\nu}{(1 + \nu)(1 - 2\nu)}.$$
+
+<p>At the demo's defaults, $E$ = 200 kPa and $\nu$ = 0.3, this gives $\mu$ = 76.9 kPa and $\lambda$ = 115 kPa. For
+scale: jelly is around 1 to 10 kPa, soft silicone rubber around 100 kPa to 1 MPa, tyre rubber several MPa. As
+$\nu \to 0.5$ the denominator $1 - 2\nu$ vanishes and $\lambda \to \infty$: the material becomes incompressible. Rubber
+has $\nu \approx 0.49$, which gives $\lambda \approx 50\mu$, and the explicit time step shrinks with
+$1/\sqrt{\lambda}$; this is one reason nearly incompressible materials are hard to simulate explicitly. (We use the 3D
+formulas. A 2D slab that cannot thin through its thickness is in <i>plane strain</i>, for which they are exactly
+right.)</p>
+
+<h2>Linear elasticity, and why it fails</h2>
+
+<p>The textbook model uses the small strain $\boldsymbol\varepsilon = \tfrac12(\mathbf{F} + \mathbf{F}^\mathsf{T}) - \mathbf{I}$:</p>
+
+$$\Psi = \mu\, \boldsymbol\varepsilon : \boldsymbol\varepsilon + \frac{\lambda}{2} (\operatorname{tr}\boldsymbol\varepsilon)^2,
+\qquad \mathbf{P} = 2\mu\,\boldsymbol\varepsilon + \lambda \operatorname{tr}(\boldsymbol\varepsilon)\,\mathbf{I}.$$
+
+<p>It is linear in $\mathbf{F}$, cheap, and accurate for tiny deformations, which is why engineering codes use it for
+bridges. It is not frame indifferent. For a rigid rotation by $\theta$, $\boldsymbol\varepsilon = (\cos\theta - 1)\mathbf{I}$ and</p>
+
+$$\mathbf{P} = 2(\mu + \lambda)(\cos\theta - 1)\,\mathbf{I},$$
+
+<p>a compressive stress in a body that is not compressed at all. At 90&deg; with the default parameters that is
+$-385$ kPa: the model believes the block has been crushed to nothing and pushes outward with everything it has. These
+are often called <b>ghost forces</b>. Their total torque is not even zero, so linear elasticity does not conserve
+angular momentum. Select "linear", untick gravity and press "spin": the block swells to several times its area within
+half a second, while the other three models stay within 2 % of their rest area. Linear elasticity is only usable when
+rotations are small, or inside a corotated formulation that removes the rotation first, which is the next idea.</p>
+
+<h2>St Venant-Kirchhoff</h2>
+
+<p>Replace the small strain with the Green strain $\mathbf{E} = \tfrac12(\mathbf{F}^\mathsf{T}\mathbf{F} - \mathbf{I})$,
+which ignores rotation:</p>
+
+$$\Psi = \mu\,\mathbf{E} : \mathbf{E} + \frac{\lambda}{2}(\operatorname{tr}\mathbf{E})^2, \qquad
+\mathbf{P} = \mathbf{F}\left(2\mu\,\mathbf{E} + \lambda\operatorname{tr}(\mathbf{E})\,\mathbf{I}\right).$$
+
+<p>This is the <b>St Venant-Kirchhoff</b> (StVK) model. It is frame indifferent and reduces to linear elasticity for
+small strains, so it spins correctly. Its weakness is compression. Squash it along one axis by a stretch $s$, holding the
+other at 1; then $\mathbf{E} = \operatorname{diag}((s^2 - 1)/2, 0)$ and the resisting stress is</p>
+
+$$P_{11} = (2\mu + \lambda)\, \frac{s\,(s^2 - 1)}{2}.$$
+
+<p>As $s$ goes from 1 down to 0 the push-back grows, peaks at $s = 1/\sqrt3 \approx 0.577$, and then <i>falls back to
+zero</i> at $s = 0$. Past 58 % compression, StVK gets softer the harder you squash it. Worse, the energy is a function
+of $s^2$, so the inverted state $s = -1$ has zero energy: it is a second rest shape. Press "slam" with StVK selected and
+the block hits the floor at 6 m/s, folds through itself and stays inside out. The other models recover.</p>
+
+<h2>Corotated and fixed corotated</h2>
+
+<p>The polar decomposition $\mathbf{F} = \mathbf{R}\mathbf{S}$ suggests a different repair: measure the deformation as
+the distance from $\mathbf{F}$ to the nearest rotation. In terms of the signed singular values $\sigma_i$ from the last
+chapter, $|\mathbf{F} - \mathbf{R}|^2 = \sum_i (\sigma_i - 1)^2$, so a pure rotation costs nothing and every stretch or
+squash costs energy. The <b>fixed corotated</b> model, from section 6.3 of the MPM course notes, is</p>
+
+$$\Psi = \mu \sum_i (\sigma_i - 1)^2 + \frac{\lambda}{2}(J - 1)^2,$$
+
+$$\mathbf{P} = 2\mu\,(\mathbf{F} - \mathbf{R}) + \lambda\,(J - 1)\,J\mathbf{F}^{-\mathsf{T}}.$$
+
+<p>Two derivatives make up $\mathbf{P}$. The first term needs $\partial/\partial\mathbf{F}\sum_i(\sigma_i - 1)^2 = 2(\mathbf{F} - \mathbf{R})$,
+which we justify in the SVD section below. The second needs the derivative of the determinant,
+$\partial J/\partial \mathbf{F} = J\mathbf{F}^{-\mathsf{T}}$. In 2D that matrix is the <b>cofactor matrix</b>,</p>
+
+$$J\mathbf{F}^{-\mathsf{T}} = \begin{pmatrix} d & -c \\ -b & a \end{pmatrix} \quad\text{for}\quad \mathbf{F} = \begin{pmatrix} a & b \\ c & d \end{pmatrix},$$
+
+<p>which contains no division and so stays finite when the element is flat or inverted. That is what makes the model
+robust: the volume term always pushes $J$ back towards 1, even from $J \lt 0$, and the rotation $\mathbf{R}$ comes from
+the polar decomposition you wrote in chapter 21. The word "fixed" refers to the original <i>corotated</i> model, whose
+volume term used $\operatorname{tr}(\mathbf{S} - \mathbf{I})$ and handled inversion badly; Stomakhin et al. (2012)
+replaced it with $(J - 1)^2$. Fixed corotated is the most common default elastic material in graphics MPM codes, and
+the elastic constraint of the <a href="28-pbmpm.html">Position-Based MPM</a> chapter is built on the same polar
+rotation $\mathbf{R}$.</p>
+
+<h2>Neo-Hookean</h2>
+
+<p>The most common model in mechanics texts is <b>neo-Hookean</b> (MPM course eqs. 46 and 48):</p>
+
+$$\Psi = \frac{\mu}{2}\left(\operatorname{tr}(\mathbf{F}^\mathsf{T}\mathbf{F}) - d\right) - \mu\log J + \frac{\lambda}{2}(\log J)^2,$$
+
+$$\mathbf{P} = \mu\,(\mathbf{F} - \mathbf{F}^{-\mathsf{T}}) + \lambda\,\log(J)\,\mathbf{F}^{-\mathsf{T}},$$
+
+<p>with $d = 2$ in 2D. The $-\mu\log J$ term cancels the first term's pull at rest, so $\mathbf{P}(\mathbf{I}) = 0$. The
+logarithms make the energy rise to infinity as $J \to 0$: neo-Hookean will not let you crush it flat, which is excellent
+physics. Numerically it has two costs. It is undefined for $J \le 0$, so any inversion caused by a large step or a
+violent collision is a problem; the demo continues the volume term as a straight line below $J = 0.1$, a common
+practical guard. And it stiffens enormously under compression, roughly like $1/J^2$, which shrinks the explicit time
+step; the demo watches the smallest $J$ and takes more substeps when needed (watch the substep count during a
+"slam").</p>
+
+<table>
+<tr><th>Model</th><th>Rotation</th><th>Strong compression</th><th>Inversion</th><th>Cost</th></tr>
+<tr><td>Linear</td><td>ghost forces</td><td>finite</td><td>no special response</td><td>cheapest</td></tr>
+<tr><td>St Venant-Kirchhoff</td><td>correct</td><td>softens past $s = 0.58$, zero at $s = 0$</td><td>stable inside out</td><td>cheap</td></tr>
+<tr><td>Fixed corotated</td><td>correct</td><td>finite, grows steadily</td><td>pushes back towards $J = 1$</td><td>needs $\mathbf{R}$</td></tr>
+<tr><td>Neo-Hookean</td><td>correct</td><td>infinite as $J \to 0$</td><td>undefined, needs a guard</td><td>a logarithm</td></tr>
+</table>
+
+<h2>Isotropy and the SVD</h2>
+
+<p>Every isotropic, frame indifferent energy can be written as a function of the singular values alone,
+$\Psi(\mathbf{F}) = \hat\Psi(\sigma_1, \sigma_2)$. This turns matrix calculus into ordinary calculus. The stress is</p>
+
+$$\mathbf{P} = \mathbf{U}\,\hat{\mathbf{P}}\,\mathbf{V}^\mathsf{T}, \qquad \hat{\mathbf{P}} = \operatorname{diag}\!\left(\frac{\partial\hat\Psi}{\partial\sigma_1}, \frac{\partial\hat\Psi}{\partial\sigma_2}\right).$$
+
+<p>A proof sketch, following the course notes. Frame indifference, $\Psi(\mathbf{R}\mathbf{F}) = \Psi(\mathbf{F})$, can be
+differentiated: the change of energy $\mathbf{P}(\mathbf{F}) : d\mathbf{F}$ must equal
+$\mathbf{P}(\mathbf{R}\mathbf{F}) : \mathbf{R}\,d\mathbf{F}$ for every $d\mathbf{F}$, which forces
+$\mathbf{P}(\mathbf{R}\mathbf{F}) = \mathbf{R}\,\mathbf{P}(\mathbf{F})$. Isotropy gives
+$\mathbf{P}(\mathbf{F}\mathbf{Q}) = \mathbf{P}(\mathbf{F})\mathbf{Q}$ the same way. Apply both with $\mathbf{U}$ and
+$\mathbf{V}$, and $\mathbf{P}(\mathbf{U}\boldsymbol\Sigma\mathbf{V}^\mathsf{T}) = \mathbf{U}\,\mathbf{P}(\boldsymbol\Sigma)\,\mathbf{V}^\mathsf{T}$;
+at a diagonal $\mathbf{F} = \boldsymbol\Sigma$ the stress is diagonal with entries $\partial\hat\Psi/\partial\sigma_i$.</p>
+
+<p>Check it on fixed corotated. $\partial\hat\Psi/\partial\sigma_1 = 2\mu(\sigma_1 - 1) + \lambda(J - 1)\sigma_2$, since
+$J = \sigma_1\sigma_2$. So $\hat{\mathbf{P}} = 2\mu(\boldsymbol\Sigma - \mathbf{I}) + \lambda(J-1)J\boldsymbol\Sigma^{-1}$, and
+multiplying out, $\mathbf{U}\boldsymbol\Sigma\mathbf{V}^\mathsf{T} = \mathbf{F}$, $\mathbf{U}\mathbf{V}^\mathsf{T} = \mathbf{R}$ and
+$\mathbf{U}\boldsymbol\Sigma^{-1}\mathbf{V}^\mathsf{T} = \mathbf{F}^{-\mathsf{T}}$. That is eq. (52), and it also proves
+$\partial/\partial\mathbf{F}\sum(\sigma_i - 1)^2 = 2(\mathbf{F} - \mathbf{R})$.</p>
+
+<p>The same trick handles the second derivative $\partial\mathbf{P}/\partial\mathbf{F}$, which implicit integrators need
+(chapter 27). In the rotated frame it splits into small blocks: one built from the second derivatives
+$\partial^2\hat\Psi/\partial\sigma_i\partial\sigma_j$, and, for each pair $i, j$, a 2&times;2 block containing
+$1/(\sigma_i^2 - \sigma_j^2)$. That fraction blows up when two singular values are equal (for example at rest), so the
+notes rewrite it in partial fractions, where one piece has a finite limit and the other is clamped. You do not need it
+yet; just remember that it lives in section 6.4.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>implement the fixed corotated stress</h4>
+<p>Open the starter (<a href="../code/run.html?src=22-hyperelasticity/starter.js" target="_blank">run it</a>,
+<a href="../code/22-hyperelasticity/starter.js" target="_blank">read it</a>). The block falls and collapses into a line
+of dots, because no triangle produces a force yet. First fill in <code>fixedCorotatedP</code>, returning both $\mathbf{P}$
+and $\Psi$. The helpers <code>polarRotation</code> and <code>cofactor</code> are provided. Before running anything,
+check by hand that your $\mathbf{P}$ is zero for $\mathbf{F} = \mathbf{I}$ and for a 90&deg; rotation.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>All the matrices are four numbers in row order, and both terms of $\mathbf{P}$ are entry-by-entry combinations:
+<code>P[k] = 2 * mu * (F[k] - R[k]) + lam * (J - 1) * cof[k]</code>.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">function fixedCorotatedP(F, mu, lam) {
+  const R = polarRotation(F), J = det(F), cof = cofactor(F);
+  const D = [F[0] - R[0], F[1] - R[1], F[2] - R[2], F[3] - R[3]];   // F - R
+  const P = [];
+  for (let k = 0; k &lt; 4; k++) P.push(2 * mu * D[k] + lam * (J - 1) * cof[k]);
+  const psi = mu * (D[0] * D[0] + D[1] * D[1] + D[2] * D[2] + D[3] * D[3]) + 0.5 * lam * (J - 1) * (J - 1);
+  return { P, psi };
+}</code></pre>
+</details>
+
+<div class="exercise">
+<h4>implement the triangle force</h4>
+<p>Now fill in <code>addTriangleForces</code> with $\mathbf{H} = -V^0\mathbf{P}\mathbf{D}_m^{-\mathsf{T}}$. When both
+functions work, the block drops, bounces and settles, and all four models behave like the demo. Then test it the way
+the demo was tested: add a few lines that nudge one vertex by $\pm 10^{-7}$ m, recompute the total energy
+$\sum V^0\Psi$, and compare the central difference with your force. They should agree to six or more digits. A sign
+error or a missing transpose shows up immediately.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>$(\mathbf{P}\mathbf{D}_m^{-\mathsf{T}})_{ij} = \sum_k P_{ik}(\mathbf{D}_m^{-1})_{jk}$. With
+<code>Dm^-1 = [m00, m01, m10, m11]</code>, entry $(0, 0)$ is <code>P[0] * m00 + P[1] * m01</code> and entry $(0, 1)$ is
+<code>P[0] * m10 + P[1] * m11</code>.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">const H00 = -V0 * (P[0] * m00 + P[1] * m01), H01 = -V0 * (P[0] * m10 + P[1] * m11);
+const H10 = -V0 * (P[2] * m00 + P[3] * m01), H11 = -V0 * (P[2] * m10 + P[3] * m11);
+fx[i1] += H00; fy[i1] += H10;
+fx[i2] += H01; fy[i2] += H11;
+fx[i0] -= H00 + H01; fy[i0] -= H10 + H11;</code></pre>
+<p>The full file is <a href="../code/22-hyperelasticity/solution.js" target="_blank">solution.js</a>.</p>
+</details>
+
+<div class="exercise">
+<h4>spin the block</h4>
+<p>Untick gravity, set damping to 0, and press "spin" with each model. Before you do, predict: for linear elasticity,
+what stress does a triangle feel after the block has turned through 30&deg;, and through 90&deg;? Will the block grow or
+shrink? Then watch the "area / rest area" readout. Which models keep it near 1? Bonus: compute the total torque
+$\sum_a (x_a \times f_a)$ of the elastic forces for a rotated linear block and for a rotated corotated block.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>$\mathbf{P} = 2(\mu + \lambda)(\cos\theta - 1)\mathbf{I}$. Negative $\mathbf{P}$ means the model believes the material
+is compressed; how does compressed material push on its surroundings?</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>With the defaults, $2(\mu + \lambda)$ = 385 kPa, so the stress is $-51.5$ kPa at 30&deg; and $-385$ kPa at 90&deg;. The
+model thinks the block is squashed, so it expands: in our runs the area ratio passed 2.7 after 10 frames and peaked
+near 3.9 after a quarter of a second, by which time the swelling had slowed the spin.
+Fixed corotated, StVK and neo-Hookean stayed within 2 % (the small change is the real centrifugal stretch of a spinning
+block). The torque of the linear forces on a block rotated by 0.7 rad came out around $3.8 \times 10^4$ N&middot;m per
+metre of thickness; for the other three models it was zero to round-off.</p>
+</details>
+
+<div class="exercise">
+<h4>Lamé parameters and the time step</h4>
+<p>Compute $\mu$ and $\lambda$ by hand for $E$ = 100 kPa with $\nu$ = 0.3, and again with $\nu$ = 0.45. Check them against
+the readout. Then predict how the number of substeps changes between the two (it scales with the wave speed
+$\sqrt{(\lambda + 2\mu)/\rho}$), and measure it. What would happen at $\nu$ = 0.49, and at $\nu$ = 0.5?</p>
+</div>
+
+<details class="hint"><summary>Solution</summary>
+<p>$\nu$ = 0.3: $\mu$ = 100/2.6 = 38.5 kPa, $\lambda$ = 30/(1.3 &times; 0.4) = 57.7 kPa, so $\lambda + 2\mu$ = 135 kPa.
+$\nu$ = 0.45: $\mu$ = 34.5 kPa, $\lambda$ = 45/(1.45 &times; 0.1) = 310 kPa, so $\lambda + 2\mu$ = 379 kPa. The wave speed
+grows by $\sqrt{379/135} \approx 1.68$, and so does the substep count. At $\nu$ = 0.49, $\lambda$ = 1.64 MPa, about
+$3.5\times$ the speed of $\nu$ = 0.3; at 0.5 it is infinite and an explicit simulator cannot run at all (the slider stops
+at 0.45). Incompressible materials need a different treatment, such as the pressure solves of the fluid chapters or the
+constraint view of the <a href="28-pbmpm.html">Position-Based MPM</a> chapter.</p>
+</details>
+
+<div class="paper">
+<h4>the MPM course, section 6</h4>
+<p>Section 6 of the course notes, <i>Hyperelasticity</i>, is this chapter in compressed form, and after reading it here
+you should be able to follow it equation by equation.</p>
+<ul>
+<li><b>6.1 First Piola-Kirchhoff Stress.</b> Eqs. (36)-(37) define $\mathbf{P} = \partial\Psi/\partial\mathbf{F}$ (index
+form $P_{ij} = \partial\Psi/\partial F_{ij}$); eq. (38) is our Cauchy relation $\boldsymbol\sigma = \frac1J\mathbf{P}\mathbf{F}^\mathsf{T}$.
+Eqs. (39)-(40) state frame indifference by writing $\Psi$ as a function of $\mathbf{C} = \mathbf{F}^\mathsf{T}\mathbf{F}$;
+eqs. (41)-(44) then write an isotropic energy through the invariants of $\mathbf{C}$ (note their $I_2$ is
+$\operatorname{tr}(\mathbf{C}\mathbf{C})$), and eq. (45) through the singular values, using the "polar SVD" of our
+chapter 21.</li>
+<li><b>6.2 Neo-Hookean.</b> Eq. (46) is the energy, eq. (47) the Lamé conversion, eq. (48) the stress, all as above.</li>
+<li><b>6.3 Fixed Corotated.</b> Eq. (49) is the energy and eq. (52) the stress. Eq. (51) states the two derivative facts
+we used: the derivative of $\sum\sigma_i^2$ is $2\mathbf{F}$ and that of $\sum\sigma_i$ is $\mathbf{R}$. Eqs. (53)-(59)
+then compute the <i>differential</i> $\delta\mathbf{P}$, needed for implicit integration; the hard part is
+$\delta\mathbf{R}$, which they get by noting that $\mathbf{R}^\mathsf{T}\delta\mathbf{R}$ is skew, a small linear solve
+(one unknown in 2D).</li>
+<li><b>6.4 A Practical Differentiation Strategy.</b> Eqs. (61)-(64) are our $\mathbf{P} = \mathbf{U}\hat{\mathbf{P}}\mathbf{V}^\mathsf{T}$
+with the frame indifference and isotropy proof. Eqs. (65)-(72) do the same for $\partial\mathbf{P}/\partial\mathbf{F}$,
+choosing the free rotations as $\mathbf{U}$ and $\mathbf{V}$ so that only the derivative at a diagonal $\boldsymbol\Sigma$
+is needed. They compute that with a symbolic algebra script (in 2D, rotations have one angle each); the result,
+eqs. (75)-(77), is the block structure described above, with the partial-fraction split of eq. (77) and the
+$10^{-6}$ clamp on the denominator.</li>
+</ul>
+<p>The force formula eq. (189) in section 10.4, $f_i = -\sum_p V^0_p\,\frac{\partial\Psi}{\partial\mathbf{F}}(\mathbf{F}_p)\,\mathbf{F}_p^\mathsf{T}\nabla w_{ip}$,
+is the MPM version of our $-V^0\mathbf{P}\mathbf{D}_m^{-\mathsf{T}}$; section 9.5 derives it as the gradient of the
+energy, exactly as we did for the triangle. Section 6.5 (snow plasticity) builds on fixed corotated and is the subject of
+<a href="26-plasticity.html">chapter 26</a>.</p>
+</div>
+
+<h2>Summary</h2>
+<ul>
+<li>A hyperelastic material is defined by its energy density $\Psi(\mathbf{F})$; total energy is $\sum V^0\Psi$.</li>
+<li>First Piola-Kirchhoff stress $\mathbf{P} = \partial\Psi/\partial\mathbf{F}$ is force per rest area; Cauchy stress
+$\boldsymbol\sigma = \frac1J\mathbf{P}\mathbf{F}^\mathsf{T}$ is force per current area.</li>
+<li>Forces are $-\partial\mathcal{E}/\partial x$. For a linear triangle, $\mathbf{H} = -V^0\mathbf{P}\mathbf{D}_m^{-\mathsf{T}}$
+holds the forces on two vertices, and the third balances them. MPM's force has the same form.</li>
+<li>$\mu = E/(2(1+\nu))$, $\lambda = E\nu/((1+\nu)(1-2\nu))$; $\lambda \to \infty$ as $\nu \to 0.5$.</li>
+<li>Linear elasticity creates ghost forces under rotation; StVK collapses under strong compression and is stable when
+inverted; fixed corotated is robust, including under inversion; neo-Hookean resists compression infinitely but is
+undefined for $J \le 0$.</li>
+<li>For isotropic models, $\mathbf{P} = \mathbf{U}\,\operatorname{diag}(\partial\hat\Psi/\partial\sigma_i)\,\mathbf{V}^\mathsf{T}$.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Why must an energy density satisfy $\Psi(\mathbf{R}\mathbf{F}) = \Psi(\mathbf{F})$, and which model in this chapter
+does not?</li>
+<li>Rubber with $E$ = 2 MPa and $\nu$ = 0.49: what are $\mu$ and $\lambda$?</li>
+<li>Why is $J\mathbf{F}^{-\mathsf{T}}$ safer to compute than $\mathbf{F}^{-\mathsf{T}}$, and where does it appear?</li>
+<li>Explain in one sentence each why StVK and neo-Hookean behave so differently when a block is crushed flat.</li>
+<li>Write the force on a grid node in MPM, and say which part plays the role of $\mathbf{D}_m^{-\mathsf{T}}$.</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

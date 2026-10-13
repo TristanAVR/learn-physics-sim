@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Small Steps · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="09-substepping" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Small Steps</h1>
+<p class="subtitle">Ten small steps beat one big step with ten iterations, for the same price. Here is why.</p>
+
+<p>At the end of the <a href="08-xpbd.html">last chapter</a> you had a cord that needed 110 iterations per step to
+reach its true stretch, and a steel cable that no sensible number of iterations would ever reach. Every constraint
+solver eventually runs into this wall. The obvious response is to spend more effort per step: more iterations.</p>
+
+<p>In 2019 Miles Macklin and colleagues published a short paper, <i>Small Steps in Physics Simulation</i>,
+that recommends spending the same effort differently. Instead of one step of $h$ with $n$ iterations, take $n$
+<b>substeps</b> of $h/n$ with a single iteration each. The cost is about the same. The result, for stiff systems and
+especially for heavy objects hanging on light ones, is dramatically better. It has since become the default way to
+run XPBD.</p>
+
+<p>In this chapter you will see the difference side by side, derive how the error of each option depends on $n$
+(one goes like $1/n$, the other like $1/n^2$), understand why a heavy weight on a light chain is the classic failure
+of iterative solvers, and learn which parts of a simulator belong inside the substep loop and which do not.</p>
+
+<h2>One budget, two ways to spend it</h2>
+
+<p>Suppose you can afford $n$ Gauss-Seidel sweeps over your constraints per frame. Here are the two loops. The first
+is the one from chapters 7 and 8:</p>
+
+<pre><code class="language-js">// One step of h, n iterations.
+function stepIterations(h, n) {
+  predict(h);                                // x~ = x + h v + h^2 w f_ext
+  lambda.fill(0);
+  for (let it = 0; it &lt; n; it++) solveSweep(alpha / (h * h));
+  updateVelocities(h);                       // v = (x - x_old) / h
+}</code></pre>
+
+<p>The second moves the loop outwards, around the whole step, and shrinks the step to match:</p>
+
+<pre><code class="language-js">// n substeps of h_s = h / n, one iteration each.
+function stepSubsteps(h, n) {
+  const hs = h / n;
+  for (let s = 0; s &lt; n; s++) {
+    predict(hs);
+    lambda.fill(0);
+    solveSweep(alpha / (hs * hs));           // the substep's own time-scaled compliance
+    updateVelocities(hs);
+  }
+}</code></pre>
+
+<p>Both do $n$ sweeps over the constraints per frame. The substepped version also repeats the cheap per-particle work,
+the prediction and the velocity update, $n$ times; we will measure what that costs later. We write the substep as
+$h_s = h/n$, so with $h$ = 1/60 s and $n = 10$, each substep is 1.67 ms.</p>
+
+<p>The demo runs both on identical chains: 20 links, 1.5 m long, 0.1 kg beads, nearly rigid ($\alpha = 10^{-6}$
+m/N), and a weight at the bottom whose mass is set by the mass ratio slider, $M/m$. It starts at a ratio of 100, so
+the weight is 10 kg. The dashed green line is the exact static stretch from chapter 8, about 2 mm here. The plot
+shows how far each chain is from it, as a percentage of the chain length.</p>
+
+<div class="demo" data-src="09-substepping/solution.js" data-height="520"
+     data-caption="Left: one step with n iterations. Right: n substeps with one iteration each. Same number of constraint projections."></div>
+
+<p>The left chain sags like a bungee cord: with the defaults it ends up 37 % longer than it should be. The right
+chain, doing exactly the same number of constraint projections, is 3.8 % too long. Raise $n$ and both improve, but
+not at the same rate. Lower the mass ratio and both improve, and at a ratio of 1 the left chain looks almost
+acceptable.</p>
+
+<h2>What the demo measures</h2>
+
+<p>Here are the settled stretch errors, in percent of the chain length, for a few combinations:</p>
+
+<table>
+<tr><th>mass ratio</th><th>$n$ = 5</th><th>$n$ = 10</th><th>$n$ = 20</th><th>$n$ = 40</th></tr>
+<tr><td>1, iterations</td><td>6.83</td><td>3.36</td><td>1.63</td><td>0.77</td></tr>
+<tr><td>1, substeps</td><td>1.38</td><td>0.35</td><td>0.086</td><td>0.022</td></tr>
+<tr><td>100, iterations</td><td>74.0</td><td>37.4</td><td>18.7</td><td>9.25</td></tr>
+<tr><td>100, substeps</td><td>15.1</td><td>3.76</td><td>0.94</td><td>0.24</td></tr>
+<tr><td>1000, iterations</td><td>687</td><td>366</td><td>158</td><td>85</td></tr>
+<tr><td>1000, substeps</td><td>124</td><td>33.6</td><td>8.9</td><td>2.2</td></tr>
+</table>
+
+<p>Three patterns stand out. Doubling $n$ halves the error with iterations and <i>quarters</i> it with substeps. The
+ratio between the two errors is close to $n$ itself: about 5 at $n$ = 5, 10 at $n$ = 10, 39 at $n$ = 40. And the
+error of both grows roughly in proportion to the mass ratio. All three fall out of one short argument.</p>
+
+<h2>Error in, error out</h2>
+
+<p>Think about the chain at rest. Every step, the prediction moves each free particle down by $h^2 g$, gravity's
+contribution to $\tilde{\mathbf{x}}$. Because the whole chain drops by the same amount, the only constraint that
+notices is the top link, attached to the fixed support: it stretches by $h^2 g$. That is <b>error in</b>. The solver
+then has to lift the entire chain, weight included, back up. That is <b>error out</b>.</p>
+
+<p>Gauss-Seidel does not remove an error in one sweep. A linear iteration like this one shrinks each pattern (each
+eigenvector) of the error by a fixed factor per sweep, and what matters in the long run is the slowest pattern,
+which shrinks by a factor $\mu$ slightly below 1. Here it is the pattern in which the whole chain moves together with
+the weight. Write $1 - \mu$ for the fraction of that pattern removed by one sweep. For our 20-link chain it is about
+0.006 with equal masses and 0.0005 at a mass ratio of 100 (<a href="10-linear-solvers.html">chapter 10</a> shows how to
+compute it).</p>
+
+<p>At steady state, error in equals error out. Call $E$ the standing stretch error of the chain.</p>
+
+<p><b>Iterations.</b> Per frame, $h^2 g$ comes in, and $n$ sweeps remove a fraction $1 - \mu^n$ of what is standing.
+While $n(1-\mu) \ll 1$, that fraction is close to $n(1 - \mu)$, so</p>
+
+$$E_{\text{iter}}\,n(1 - \mu) \approx h^2 g \quad\Longrightarrow\quad E_{\text{iter}} \approx \frac{h^2 g}{n\,(1-\mu)} .$$
+
+<p><b>Substeps.</b> Per substep, only $h_s^2 g = h^2 g/n^2$ comes in, and one sweep removes a fraction $1-\mu$:</p>
+
+$$E_{\text{sub}}\,(1 - \mu) \approx \frac{h^2 g}{n^2} \quad\Longrightarrow\quad E_{\text{sub}} \approx \frac{h^2 g}{n^2\,(1-\mu)} .$$
+
+<p>Per projection, both remove error at the same rate. The difference is how much error comes in. Over a frame, the
+substeps let in $n$ helpings of $h^2g/n^2$, which is $h^2 g/n$ in total: $n$ times less than one big step. The error
+going in is the gravity the prediction step adds without any constraint pushing back, and it is quadratic in the step
+size. Splitting the step splits that quadratic.</p>
+
+<p>Check the formulas against the table. With $h$ = 1/60 s, $h^2 g = 2.7$ mm. At a mass ratio of 100, $1 - \mu =
+4.94\times10^{-4}$, so with $n$ = 10:</p>
+
+$$E_{\text{iter}} \approx \frac{0.002725}{10 \times 0.000494} = 0.55\ \text{m} = 36.7\,\%,\qquad
+E_{\text{sub}} \approx \frac{0.002725}{100 \times 0.000494} = 0.055\ \text{m} = 3.67\,\%,$$
+
+<p>against 37.4 % and 3.76 % measured. At a ratio of 1 the same formulas give 2.95 % and 0.30 %, measured 3.36 % and
+0.35 %: still the right size, a little low because the slowest pattern is less dominant there. Not bad for a
+back-of-the-envelope argument.</p>
+
+<div class="note">
+<p><b>The rule of thumb:</b> with $n$ iterations, the leftover constraint error falls like $1/n$; with $n$ substeps,
+like $1/n^2$. Iterations fight the error after it has been made. Substeps make less of it.</p>
+</div>
+
+<p>The argument also says when iterations can catch up: when $n(1-\mu)$ is not small, so that $\mu^n$ is close to
+zero and a single step's sweeps really do converge. Then the iterations version has essentially no error left, while
+the substepped one still carries its $1/n^2$. That happens when the constraints are soft compared with the time step,
+the $S \ll 1$ regime of chapter 8, or when the system is small. For the stiff chains, cables and stacks that cause
+trouble in practice, you are nowhere near it: a rigid 20-link chain with equal masses has $1/(1-\mu) \approx 160$
+sweeps, and at a mass ratio of 1000 it is about 19,000.</p>
+
+<h2>Heavy weights on light chains</h2>
+
+<p>Why does the mass ratio make $1 - \mu$ so small? Watch what one sweep does to the bottom link of a stretched chain.
+The correction is shared in proportion to inverse mass, so the 0.1 kg bead moves and the 10 kg weight hardly moves at
+all. But moving the bead stretches the link above it, whose correction moves the next bead, and so on up to the
+support. A sweep shuffles error along the chain among the light beads. Only the tiny share $w_M/(w_m + w_M)$ of each
+bottom-link correction actually lifts the weight, and lifting the weight is the whole point.</p>
+
+<p>In matrix terms, the system matrix $\nabla\mathbf{C}\,\mathbf{M}^{-1}\nabla\mathbf{C}^T$ from chapter 8 has entries
+of size $w_m = 10$ kg<sup>-1</sup> for the bead links and one direction, the whole chain moving with the weight, along
+which it is nearly flat because $w_M = 0.1$ kg<sup>-1</sup>. A nearly flat direction is a nearly singular matrix, and
+iterative solvers crawl along nearly flat directions. Here is the measured slowest factor for our 20-link chain:</p>
+
+<table>
+<tr><th>mass ratio $M/m$</th><th>1</th><th>10</th><th>100</th><th>1000</th></tr>
+<tr><td>$1-\mu$ (per sweep)</td><td>0.0062</td><td>0.0031</td><td>0.00049</td><td>0.000052</td></tr>
+<tr><td>sweeps to remove 63 % of the slowest pattern, $1/(1-\mu)$</td><td>162</td><td>321</td><td>2,022</td><td>19,121</td></tr>
+</table>
+
+<p>At large ratios $1-\mu$ falls almost in proportion to $1/(M/m)$ (a factor of 9.5 from 100 to 1000), and so the
+error of both methods grows almost in proportion to the mass ratio, as the table of errors showed. Substepping does not change $\mu$; it does not make the
+solver converge any faster. It reduces how much error each step creates, and that is enough to push the failure point
+out by a factor of $n$.</p>
+
+<p>Mass ratios are everywhere: a heavy anchor on a light rope, a wrecking ball on a chain, a character holding a
+crate, a tablecloth weighted by plates. Anywhere a light thing holds up a heavy thing, iterations alone will make the
+light thing stretch.</p>
+
+<h2>Substeps and compliance</h2>
+
+<p>For XPBD constraints with compliance, substepping has a second effect. Each substep uses its own time-scaled
+compliance</p>
+
+$$\tilde\alpha_s = \frac{\alpha}{h_s^2} = n^2\,\frac{\alpha}{h^2},
+\qquad\text{so}\qquad
+S_s = \frac{h_s^2\sum w|\nabla C|^2}{\alpha} = \frac{S}{n^2}.$$
+
+<p>The stiffness ratio of chapter 8 shrinks with the <i>square</i> of the number of substeps. A middle link of the
+demo chain, two 0.1 kg beads and $\alpha = 10^{-6}$ m/N, has $S = 20 \times 2.78\times10^{-4}/10^{-6} \approx 5{,}600$ at
+$h$ = 1/60 s. With 10 substeps it is 56, and with 40 substeps 3.5: soft enough, by chapter 8's measure, that a single
+iteration per substep gets close. The cord from chapter 8 with $\alpha = 10^{-4}$ m/N, which needed 110 iterations,
+has $S$ = 0.56 with 10 substeps, well inside the fast-converging regime.</p>
+
+<p>Remember also what XPBD promised: at convergence, the static result does not depend on the time step. So
+substepping does not change the answer you are converging to. It only gets you there.</p>
+
+<h2>What goes inside the substep loop</h2>
+
+<p>In the demo, everything is inside the loop because there is nothing else. A real simulator has expensive work that
+does not need to run every substep. The rule is: things that depend on positions changing a lot can run once per
+frame; things that enforce constraints run every substep.</p>
+
+<pre><code class="language-js">function frame(h, n) {
+  // Once per frame: find everything that MIGHT touch during this frame.
+  // Expand each object's bounding box by how far it can move, |v| h, plus a margin.
+  const candidates = broadPhase(h);
+  const hs = h / n;
+  for (let s = 0; s &lt; n; s++) {
+    predict(hs);
+    lambda.fill(0);
+    solveConstraints(hs);                    // joints, links, bending, ...
+    solveContacts(candidates, hs);           // re-evaluate each candidate's distance NOW
+    updateVelocities(hs);
+    solveVelocities(hs);                     // friction and restitution, if you have them
+  }
+}</code></pre>
+
+<p>Collision <i>detection</i>, the search for which pairs might touch, is the expensive part, and objects move very
+little within one frame, so it runs once with a safety margin. Collision <i>response</i> runs per substep: each
+candidate pair becomes a contact constraint whose current penetration is recomputed from the current positions, so a
+pair that was apart at the start of the frame can still make contact halfway through. Contacts are covered in
+<a href="16-contact-friction.html">chapter 16</a>. Rendering, user input and anything driven by the game logic also
+stay per frame.</p>
+
+<h2>Energy and damping</h2>
+
+<p>Substepping has a side effect you will notice as soon as something swings. In chapter 4, implicit Euler took away
+energy from an oscillation of frequency $\omega$ by a factor $1/(1 + h^2\omega^2)$ per step. XPBD inherits that
+numerical damping. With $n$ substeps the factor per frame becomes</p>
+
+$$\left(\frac{1}{1 + h_s^2\omega^2}\right)^{n} \approx 1 - \frac{h^2\omega^2}{n}
+\qquad\text{instead of}\qquad \frac{1}{1 + h^2\omega^2}.$$
+
+<p>For a mode with $h\omega$ = 0.5, one step keeps 80 % of the energy per frame; ten substeps keep 97.5 %. Press "swing
+both weights" in the demo (at a mass ratio of 10): after ten seconds the substepped chain still has about 65 % of its
+swing energy and the iterated one about 37 %. Part of the iterated chain's loss is its unconverged constraints, which
+act like extra dissipation; part is the big step.</p>
+
+<p>Usually this is welcome: things look livelier and less like they are moving through syrup. But a large step was
+quietly damping your jitter, and substepping removes that. Simulations that looked calm with one step can buzz with
+many. The fix is to add <i>physical</i> damping where you want it, such as the XPBD damping term from chapter 8, rather
+than relying on the integrator's.</p>
+
+<div class="warning">
+<p><b>Very small steps and single precision.</b> With $h_s$ = 0.1 ms, the gravity displacement per substep is $h_s^2 g
+\approx 10^{-7}$ m. A single-precision float storing a position near 1 m has a resolution of about $10^{-7}$ m, so
+the update is barely representable. On a GPU in single precision, hundreds of substeps can start to lose motion
+to rounding. Storing positions relative to a nearby origin, or accumulating displacements rather than absolute
+positions, helps. JavaScript numbers are doubles, so you will not see this here.</p>
+</div>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>implement the substep loop</h4>
+<p>Open the starter (<a href="../code/run.html?src=09-substepping/starter.js" target="_blank">run it</a>,
+<a href="../code/09-substepping/starter.js" target="_blank">read it</a>). The left chain works. The right chain is
+supposed to be substepped, but <code>stepSubsteps</code> is a placeholder that takes one step with a single iteration,
+so the right weight drops metres below where it should be. Replace the placeholder with $n$ substeps of $h_s = h/n$,
+each with one sweep.</p>
+<p>When it works, the defaults ($n$ = 10, mass ratio 100) settle at about 37 % error on the left and under 4 % on the
+right.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>All the pieces exist: <code>predict(c, hs)</code>, <code>solveSweep(c, alphaTilde)</code> and
+<code>updateVelocities(c, hs)</code>. Be careful to use the substep's own time-scaled compliance, $\alpha/h_s^2$, not
+$\alpha/h^2$, and to reset <code>c.lambda</code> every substep: each substep is a complete XPBD step.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Compare with <a href="../code/09-substepping/solution.js" target="_blank">solution.js</a>:</p>
+<pre><code class="language-js">function stepSubsteps(c, dt, N) {
+  const hs = dt / N;
+  const alphaTilde = compliance.value / (hs * hs);
+  for (let s = 0; s &lt; N; s++) {
+    predict(c, hs);
+    c.lambda.fill(0);
+    solveSweep(c, alphaTilde);
+    updateVelocities(c, hs);
+  }
+}</code></pre>
+</details>
+
+<div class="exercise">
+<h4>predict the gap at a mass ratio of 100</h4>
+<p>Before touching the demo, use the formulas $E_{\text{iter}} \approx h^2g/(n(1-\mu))$ and $E_{\text{sub}} \approx
+h^2g/(n^2(1-\mu))$ to predict which chain stretches more at a mass ratio of 100 and $n$ = 10, and by what factor. Then
+predict both errors at $n$ = 20, using $1 - \mu = 4.94\times10^{-4}$ and a chain length of 1.5 m. Check in the
+demo.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>The ratio of the two formulas is $n$, whatever $\mu$ is. For the absolute values, $h^2 g = 2.725$ mm.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>The iterated chain stretches about $n$ = 10 times more: 36.7 % against 3.7 % predicted, 37.4 % and 3.76 % measured.
+At $n$ = 20 the predictions are $0.002725/(20 \times 0.000494) = 0.276$ m, or 18.4 %, and
+$0.002725/(400 \times 0.000494) = 0.0138$ m, or 0.92 %. The demo settles at 18.7 % and 0.94 %.</p>
+</details>
+
+<div class="exercise">
+<h4>find where each one fails</h4>
+<p>Call a chain "failed" when its stretch error passes 10 % of its length: it no longer looks like a chain. With $n$
+= 10, raise the mass ratio slowly (press R after each change and let it settle) and find the ratio at which each
+chain fails. Then predict how both thresholds move when you double $n$ to 20, and check.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>Both errors grow roughly in proportion to the mass ratio, and you know how each depends on $n$.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>At $n$ = 10 the iterated chain fails near a mass ratio of 20 and the substepped one near 280: a factor of about
+14, a little more than $n$ because the error is not exactly proportional to the mass ratio at small ratios. Doubling
+$n$ should double the iterated chain's threshold (error $\propto 1/n$) and quadruple the substepped one's
+($\propto 1/n^2$). In the demo the iterated chain now fails at a ratio of about 50 (a little more than double,
+for the same reason as before), and the substepped one does not
+fail anywhere on the slider: at a ratio of 1000 its error is 8.9 %.</p>
+</details>
+
+<div class="exercise">
+<h4>check that the cost is the same</h4>
+<p>Press "time 1000 frames of each". It runs each method on a fresh chain for 1000 frames and reports the time per
+frame. Try $n$ = 10 and $n$ = 40. Are the costs equal? Which parts of the substep loop run $n$ times that the iteration
+loop runs once, and how much work are they compared with a sweep? What would change for cloth, where every particle
+has three to six constraints?</p>
+</div>
+
+<details class="hint"><summary>Solution</summary>
+<p>On my laptop the two take about 5.2 and 6.2 &micro;s per frame at $n$ = 10, and 19 and 24 &micro;s at $n$ = 40: the
+substeps cost about 20-25 % more. The extra is the prediction, the velocity update and the multiplier reset, which
+the substep loop runs $n$ times. On this chain there is one constraint per particle, so that per-particle work is a
+noticeable fraction of a sweep. In cloth or a soft body with several constraints per particle, and with constraints
+that cost more than a distance (bending, volume, contacts), the sweeps dominate and the two costs become nearly
+equal. Either way, the substepped chain is ten times more accurate for 20 % more time; to get the same accuracy from
+iterations you would need ten times as many.</p>
+</details>
+
+<div class="paper">
+<h4>Small Steps in Physics Simulation</h4>
+<p>Macklin, Storey, Lu, Terdiman, Chentanez, Jeschke and M&uuml;ller (Symposium on Computer Animation, 2019) make the
+argument of this chapter with XPBD: for a fixed budget, many substeps with one iteration each beat few steps with many
+iterations, most clearly on examples with large mass ratios and stiff constraints. They also discuss the reduced
+numerical damping that comes with it, and run collision detection once per frame with the substeps inside. Their
+substep is our $h_s = h/n$. The follow-up paper on rigid bodies, which you will meet in the
+<a href="11-rotations.html">next chapter but one</a>, is built on the same loop. Expect to meet substepping again
+whenever a position-based method needs stiffness without iterations, including in the
+<a href="28-pbmpm.html">Position-Based MPM</a> chapter.</p>
+</div>
+
+<h2>Summary</h2>
+<ul>
+<li>For the same number of constraint projections, $n$ substeps of $h/n$ with one iteration each are far more accurate
+than one step with $n$ iterations, for stiff systems.</li>
+<li>The reason is error in versus error out. Both remove error at the same rate per sweep, but the error created per
+frame by the prediction step is $h^2 g$ for one step and $h^2g/n$ for $n$ substeps. The standing error is
+$\approx h^2g/(n(1-\mu))$ for iterations and $\approx h^2g/(n^2(1-\mu))$ for substeps.</li>
+<li>Heavy objects on light constraints make the solver's slowest mode nearly flat: $1-\mu$ shrinks like $1/(M/m)$, and
+the error grows with the mass ratio. Substepping does not fix the convergence, it pushes the failure point out by a
+factor of $n$.</li>
+<li>With compliance, each substep has $\tilde\alpha_s = n^2\tilde\alpha$ and $S_s = S/n^2$, so stiff constraints start
+to look soft to the solver.</li>
+<li>Collision detection runs once per frame with a margin; contact constraints are re-evaluated every substep.</li>
+<li>Substeps reduce numerical damping by about a factor of $n$. Add physical damping explicitly where you want it.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Why does splitting a step into $n$ substeps reduce the error created per frame by a factor of $n$, and not
+$n^2$?</li>
+<li>A solver's slowest error pattern shrinks by $1 - \mu = 10^{-3}$ per sweep. With $h$ = 1/60 s and $n$ = 8, estimate
+the standing stretch error of a hanging chain for iterations and for substeps.</li>
+<li>Why does a heavy weight on a light chain converge more slowly than a light weight on a heavy chain?</li>
+<li>Which parts of a simulator run once per frame and which run every substep? Why can collision detection be
+outside the loop?</li>
+<li>When would you still prefer iterations over substeps?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

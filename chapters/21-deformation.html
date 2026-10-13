@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Deformation Gradient · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="21-deformation" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>The Deformation Gradient</h1>
+<p class="subtitle">One small matrix that tells every piece of a material how it has been stretched, sheared, turned or crushed.</p>
+
+<p>So far every soft thing on this site has been built from parts: springs between particles, distance constraints,
+triangles of cloth. Each part has its own rest length or rest angle, and the material's behaviour is whatever the parts
+add up to. That works, but it ties the physics to the mesh. Cut a block of jelly into a different set of triangles and
+it becomes a slightly different jelly. And when the material flows, like dough being kneaded or sand pouring out of a
+bucket, there is no fixed mesh to hang the springs on at all.</p>
+
+<p>Continuum mechanics takes the opposite view. It describes the material itself, as a smooth substance, and asks one
+local question at every point: <i>how has the neighbourhood of this point been deformed?</i> The answer is a 2&times;2
+matrix in 2D (3&times;3 in 3D) called the <b>deformation gradient</b>, $\mathbf{F}$. Everything in the next eight
+chapters, from elastic stress to snow plasticity to the Material Point Method, is built on it.</p>
+
+<p>By the end of this chapter you will be able to compute $\mathbf{F}$ for a triangle, read off its area change, split
+it into a rotation and a stretch, measure strain in a way that ignores rotation, and evolve $\mathbf{F}$ through time in
+a velocity field with the same one-line update that MPM codes use.</p>
+
+<h2>Matter as a continuum</h2>
+
+<p>A block of rubber is made of long tangled molecules, and sand is made of grains, but at the scale we care about
+neither fact matters. We adopt the <b>continuum assumption</b>: the material fills space smoothly, and quantities such
+as density, velocity and stress are smooth functions of position. A "point" of the material is then a tiny
+neighbourhood: small enough that the deformation inside it is uniform, large enough to contain many molecules or
+grains.</p>
+
+<p>The payoff is that we can use calculus. The price is that we must be careful about which coordinates we use,
+because a material that moves and deforms has two natural ways of naming its points.</p>
+
+<h2>Two sets of coordinates</h2>
+
+<p>Paint a grid on a block of jelly while it sits at rest, and label each painted point by where it was: its
+<b>material coordinates</b> (or rest coordinates) $X$. These labels belong to the material. When you squash the jelly,
+the paint moves with it, so the point labelled $X$ keeps its label forever.</p>
+
+<p>Where that point is <i>now</i> is its <b>world coordinates</b> $x$ (also called spatial or deformed coordinates). The
+motion of the whole material is a single function, the <b>deformation map</b> $\phi$:</p>
+
+$$x = \phi(X, t).$$
+
+<p>At $t = 0$ we usually choose $\phi(X, 0) = X$: the rest shape and the starting shape coincide. Two examples. If the
+block slides along a direction $n$ at speed $s$, then $\phi(X, t) = X + s\,t\,n$. If it moves rigidly, turning by a
+rotation matrix $\mathbf{R}$ and shifting by $b$, then $\phi(X, t) = \mathbf{R}X + b$. Neither motion deforms the
+jelly, and whatever measure of deformation we invent had better say so.</p>
+
+<p>The velocity of a material point is how fast its world position changes while its label stays fixed:
+$V(X, t) = \partial\phi/\partial t$. Hold on to the phrase "label fixed"; it will matter when we meet the Eulerian view
+later in the chapter.</p>
+
+<h2>The deformation gradient</h2>
+
+<p>Pick a material point $X$ and a second point a tiny distance away, $X + dX$. After the motion they sit at
+$\phi(X)$ and $\phi(X + dX)$. A first-order Taylor expansion gives the new separation:</p>
+
+$$dx = \phi(X + dX) - \phi(X) \approx \frac{\partial \phi}{\partial X}\, dX = \mathbf{F}\, dX.$$
+
+<p>That matrix of partial derivatives is the deformation gradient:</p>
+
+$$\mathbf{F} = \frac{\partial x}{\partial X} = \begin{pmatrix} \partial x_1/\partial X_1 & \partial x_1/\partial X_2 \\ \partial x_2/\partial X_1 & \partial x_2/\partial X_2 \end{pmatrix},
+\qquad F_{ij} = \frac{\partial x_i}{\partial X_j}.$$
+
+<p>Read the equation $dx = \mathbf{F}\,dX$ as a recipe: <i>give me a tiny arrow drawn in the rest material, and
+$\mathbf{F}$ tells you where that arrow is now.</i> In particular, the first column of $\mathbf{F}$ is what happened to
+a tiny arrow that pointed along $X_1$ at rest, and the second column is what happened to one along $X_2$. Translation
+does not appear at all: $\mathbf{F}$ only knows about the shape of the neighbourhood, not where it is.</p>
+
+<p>When $\phi$ is an affine map, $x = \mathbf{F}X + b$, the matrix is the same everywhere and the formula is exact for
+arrows of any length. In general $\mathbf{F}$ varies from point to point, and the affine map is only the best local
+approximation, like a tangent line to a curve. Here are four affine examples, all in the demo below. Each maps the unit
+square $[0, 1]^2$:</p>
+
+<table>
+<tr><th>Motion</th><th>$\mathbf{F}$</th><th>What the square becomes</th></tr>
+<tr><td>Stretch $x_1$ by 2</td><td>$\begin{pmatrix} 2 & 0 \\ 0 & 1 \end{pmatrix}$</td><td>a 2 &times; 1 rectangle</td></tr>
+<tr><td>Shear by 0.5</td><td>$\begin{pmatrix} 1 & 0.5 \\ 0 & 1 \end{pmatrix}$</td><td>a parallelogram leaning right; the top edge slides 0.5</td></tr>
+<tr><td>Rotate by 30&deg;</td><td>$\begin{pmatrix} 0.866 & -0.5 \\ 0.5 & 0.866 \end{pmatrix}$</td><td>the same square, turned</td></tr>
+<tr><td>Stretch 1.5 &times; 0.8, then rotate 30&deg;</td><td>$\begin{pmatrix} 1.299 & -0.400 \\ 0.750 & 0.693 \end{pmatrix}$</td><td>a turned 1.5 &times; 0.8 rectangle</td></tr>
+</table>
+
+<p>Look at the last one. Its entries give no obvious hint of either the stretch or the angle; untangling them is the
+job of the polar decomposition, coming shortly. For translation, $\mathbf{F} = \mathbf{I}$; for a rigid motion,
+$\mathbf{F} = \mathbf{R}$.</p>
+
+<div class="demo" data-src="21-deformation/solution.js" data-height="500"
+     data-caption="Mode 'set F by hand': the square is mapped by the F built from the sliders. Mode 'flow field': each point is carried by a velocity field and integrates its own F. Colour shows J (blue compressed, red stretched, purple inverted)."></div>
+
+<p>Play with the sliders first. The dashed circle is a small circle of material at rest; the solid ellipse is the same
+material after deformation. The orange and green arrows are the ellipse's axes: the <b>principal stretches</b>. Notice
+that rotating changes the picture but not the readouts of stretch and strain, and that pushing "stretch y" below zero
+turns everything purple. Both facts are explained below.</p>
+
+<h2>Area change and inversion: $J = \det \mathbf{F}$</h2>
+
+<p>The two columns of $\mathbf{F}$ are the images of two unit arrows. The parallelogram they span has area
+$\det \mathbf{F}$, while the unit square they came from had area 1. So the determinant is the local area ratio (volume
+ratio in 3D), and it gets its own letter:</p>
+
+$$J = \det \mathbf{F}, \qquad dv = J\, dV.$$
+
+<p>Here $dV$ is a tiny area in the rest material and $dv$ the area it occupies now. In the examples above: the stretch
+has $J = 2$, the shear and the rotation have $J = 1$ (shearing a square into a parallelogram keeps its area), and the
+combination has $J = 1.5 \times 0.8 = 1.2$. This is how MPM will track the volume of each particle: store its rest
+volume $V^0_p$ and compute the current volume as $J_p V^0_p$.</p>
+
+<p>$J > 1$ means expansion, $J \lt 1$ compression. $J = 0$ means the neighbourhood has been flattened to a line, and
+$J \lt 0$ means it has been turned inside out: the material is <b>inverted</b>. A triangle with $J \lt 0$ has had one
+corner pushed through the opposite edge, so its corners now go round the other way. Real matter never does this, but
+simulations do it all the time when a large time step or a violent collision pushes points past each other, and in the
+next chapter you will see that material models differ sharply in how they cope.</p>
+
+<h2>$\mathbf{F}$ for a triangle</h2>
+
+<p>Meshes give us $\mathbf{F}$ directly. Take a triangle with rest corners $X_0, X_1, X_2$ and current corners
+$x_0, x_1, x_2$. Inside a linear triangle the deformation is affine, so one $\mathbf{F}$ maps every rest edge onto the
+current edge: $x_1 - x_0 = \mathbf{F}(X_1 - X_0)$ and $x_2 - x_0 = \mathbf{F}(X_2 - X_0)$. Stack the edge vectors as the
+columns of two matrices,</p>
+
+$$\mathbf{D}_m = \begin{pmatrix} X_1 - X_0 & X_2 - X_0 \end{pmatrix}, \qquad
+\mathbf{D}_s = \begin{pmatrix} x_1 - x_0 & x_2 - x_0 \end{pmatrix},$$
+
+<p>and both edge equations become one: $\mathbf{D}_s = \mathbf{F}\,\mathbf{D}_m$, so</p>
+
+$$\mathbf{F} = \mathbf{D}_s\, \mathbf{D}_m^{-1}.$$
+
+<p>The subscripts are the conventional ones from finite elements: $m$ for "material", $s$ for "spatial". $\mathbf{D}_m$
+never changes, so a simulator inverts it once per triangle and stores it. A check you can do in your head: rest corners
+$(0,0), (2,0), (0,1)$ and current corners $(1,1), (1,3), (0,1)$ give
+$\mathbf{D}_m = \begin{pmatrix} 2 & 0 \\ 0 & 1\end{pmatrix}$ and
+$\mathbf{D}_s = \begin{pmatrix} 0 & -1 \\ 2 & 0\end{pmatrix}$, so
+$\mathbf{F} = \begin{pmatrix} 0 & -1 \\ 1 & 0\end{pmatrix}$: a rotation by 90&deg;, with $J = 1$. The triangle has
+turned and moved but not deformed. This formula is the heart of the finite element soft body in the next chapter.</p>
+
+<h2>Rotation is not deformation</h2>
+
+<p>We want a number that says "how deformed", and the obvious candidate, $\mathbf{F} - \mathbf{I}$, is wrong: for a
+rotation it is not zero, yet a rotated jelly is perfectly relaxed. What does not change under rotation is <i>lengths
+and angles</i>. The squared length of a deformed arrow is</p>
+
+$$|dx|^2 = dX^\mathsf{T} \mathbf{F}^\mathsf{T}\mathbf{F}\, dX,$$
+
+<p>so all length and angle information sits in $\mathbf{C} = \mathbf{F}^\mathsf{T}\mathbf{F}$ (the right Cauchy-Green
+tensor). If $\mathbf{F} = \mathbf{R}$ then $\mathbf{C} = \mathbf{R}^\mathsf{T}\mathbf{R} = \mathbf{I}$, and if we
+rotate a deformed body afterwards, $\mathbf{F} \to \mathbf{R}\mathbf{F}$, then $\mathbf{C}$ is unchanged. The
+<b>Green strain</b> measures the departure from rest:</p>
+
+$$\mathbf{E} = \tfrac12 \left(\mathbf{F}^\mathsf{T}\mathbf{F} - \mathbf{I}\right).$$
+
+<p>It is zero for any rotation, by construction. For the stretch by 2 it is
+$\mathbf{E} = \begin{pmatrix} 1.5 & 0 \\ 0 & 0 \end{pmatrix}$; the diagonal entry is $(2^2 - 1)/2$, not $2 - 1$,
+because Green strain is quadratic in the stretch. For the 0.5 shear it is
+$\begin{pmatrix} 0 & 0.25 \\ 0.25 & 0.125 \end{pmatrix}$: the off-diagonal entries record the change of angle between
+the rest axes.</p>
+
+<div class="warning">
+<p><b>The small-strain shortcut fails under rotation.</b> Engineering texts often use the linearised strain
+$\boldsymbol\varepsilon = \tfrac12(\mathbf{F} + \mathbf{F}^\mathsf{T}) - \mathbf{I}$, which is accurate when the
+deformation <i>and the rotation</i> are small. For a pure rotation by $\theta$ it gives
+$\boldsymbol\varepsilon = (\cos\theta - 1)\,\mathbf{I}$, which for 30&deg; is $-0.134\,\mathbf{I}$: the formula claims a
+rigidly turned block has been compressed by 13 % in every direction. A simulator built on it creates forces out of
+nothing whenever something spins. You will watch this happen in the next chapter.</p>
+</div>
+
+<h2>Polar decomposition and the SVD</h2>
+
+<p>Green strain throws the rotation away. Often we want both halves: how much the neighbourhood turned, and how it was
+stretched. Every $\mathbf{F}$ can be written as a stretch followed by a rotation,</p>
+
+$$\mathbf{F} = \mathbf{R}\,\mathbf{S},$$
+
+<p>with $\mathbf{R}$ a rotation and $\mathbf{S}$ symmetric. This is the <b>polar decomposition</b>. $\mathbf{S}$ is a
+pure stretch along two perpendicular directions, and $\mathbf{R}$ then turns the result; $\mathbf{R}$ is also the
+rotation closest to $\mathbf{F}$, which is why the corotated models of the next chapter use it to measure "the part of
+$\mathbf{F}$ that is not rotation".</p>
+
+<p>In 2D the decomposition has a closed form. A rotation is one angle,
+$\mathbf{R}(\theta) = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix}$, and
+$\mathbf{S} = \mathbf{R}^\mathsf{T}\mathbf{F}$ must be symmetric. With
+$\mathbf{F} = \begin{pmatrix} a & b \\ c & d \end{pmatrix}$,</p>
+
+$$\mathbf{R}^\mathsf{T}\mathbf{F} = \begin{pmatrix} a\cos\theta + c\sin\theta & b\cos\theta + d\sin\theta \\ c\cos\theta - a\sin\theta & d\cos\theta - b\sin\theta \end{pmatrix}.$$
+
+<p>Setting the two off-diagonal entries equal gives $(a + d)\sin\theta = (c - b)\cos\theta$, so</p>
+
+$$\theta = \operatorname{atan2}(c - b,\; a + d), \qquad \mathbf{S} = \mathbf{R}(\theta)^\mathsf{T}\,\mathbf{F}.$$
+
+<p>Of the two angles that satisfy the equation (they differ by 180&deg;), $\operatorname{atan2}$ picks the one that
+makes $\operatorname{tr}\mathbf{S} = \sqrt{(a+d)^2 + (c-b)^2}$ non-negative. No division, no special cases: when
+$a + d$ and $c - b$ are both zero, atan2 returns 0 and $\mathbf{S} = \mathbf{F}$. For the 0.5 shear,
+$\theta = \operatorname{atan2}(-0.5, 2) = -14.0°$: a shear is a stretch plus a small rotation, which you can see in the
+demo as the ellipse's tilt.</p>
+
+<p>Now diagonalise the symmetric $\mathbf{S}$. Its eigenvectors are the two perpendicular directions of pure stretch,
+and its eigenvalues $\sigma_1 \ge \sigma_2$ are the principal stretches. For $\mathbf{S} = \begin{pmatrix} p & q \\ q & r \end{pmatrix}$:</p>
+
+$$\sigma_{1,2} = \frac{p + r}{2} \pm \sqrt{\left(\frac{p - r}{2}\right)^2 + q^2}, \qquad
+\mathbf{V} = \mathbf{R}(\varphi),\quad \varphi = \tfrac12 \operatorname{atan2}(2q,\; p - r).$$
+
+<p>So $\mathbf{S} = \mathbf{V}\boldsymbol\Sigma\mathbf{V}^\mathsf{T}$ with $\boldsymbol\Sigma = \operatorname{diag}(\sigma_1, \sigma_2)$, and
+substituting gives the <b>singular value decomposition</b></p>
+
+$$\mathbf{F} = \mathbf{U}\boldsymbol\Sigma\mathbf{V}^\mathsf{T}, \qquad \mathbf{U} = \mathbf{R}\mathbf{V}, \qquad
+\mathbf{R} = \mathbf{U}\mathbf{V}^\mathsf{T}, \qquad \mathbf{S} = \mathbf{V}\boldsymbol\Sigma\mathbf{V}^\mathsf{T}.$$
+
+<p>Read it right to left as three steps: $\mathbf{V}^\mathsf{T}$ turns the material so its principal directions line up
+with the axes, $\boldsymbol\Sigma$ stretches along the axes, $\mathbf{U}$ turns the result into place. A circle of
+material becomes an ellipse with semi-axes $\sigma_1$ and $\sigma_2$ along the columns of $\mathbf{U}$, which is
+exactly what the demo draws. Two more facts fall out: $J = \sigma_1\sigma_2$, and the Green strain has eigenvalues
+$(\sigma_i^2 - 1)/2$. For the 0.5 shear, $\sigma_1 = 1.281$ and $\sigma_2 = 0.781$, and their product is 1.</p>
+
+<pre><code class="language-js">function polar(F) {                                  // F = [a, b, c, d]
+  const theta = Math.atan2(F[2] - F[1], F[0] + F[3]);
+  const R = rotation(theta);
+  return { R: R, S: mul(transpose(R), F), theta: theta };
+}
+
+function svd(F) {                                    // F = U diag(s1, s2) V^T
+  const pd = polar(F);
+  const e = symmetricEigen(pd.S);                    // S = V diag(l1, l2) V^T
+  return { s1: e.l1, s2: e.l2, U: mul(pd.R, rotation(e.phi)), V: rotation(e.phi) };
+}</code></pre>
+
+<div class="note">
+<p><b>Signed singular values.</b> The textbook SVD makes both singular values non-negative and lets $\mathbf{U}$ or
+$\mathbf{V}$ be a reflection. Simulation codes prefer the convention above, where $\mathbf{U}$ and $\mathbf{V}$ are
+always rotations and an inverted element shows up as $\sigma_2 \lt 0$. Because $\operatorname{tr}\mathbf{S} \ge 0$, the
+negative one is always the smaller in magnitude. The MPM course notes call this the "polar SVD", and it is what lets
+material models detect and push back against inversion. Try stretch y = $-0.5$ in the demo: the readout shows
+principal stretches 1 and $-0.5$.</p>
+</div>
+
+<h2>Push forward and pull back</h2>
+
+<p>Because every material point has both a label $X$ and a position $x$, any quantity can be written as a function of
+either. Suppose you painted a temperature onto the jelly at rest: a function $G(X)$. Asking "what is the temperature at
+the world position $x$?" means finding which material point is there and reading its label, $g(x) = G(\phi^{-1}(x))$.
+That is a <b>push forward</b>: moving a function from the rest shape to the current shape. Going the other way,
+$G(X) = g(\phi(X))$, is a <b>pull back</b>. Nothing deep happens; it is a change of variables, and it needs $\phi$ to be
+invertible, which is the mathematical form of "two pieces of material never occupy the same place".</p>
+
+<p>Vectors and areas push forward too, but they pick up factors of $\mathbf{F}$. A material arrow $dX$ pushes forward
+to $\mathbf{F}\,dX$, as we saw. An area element $dV$ pushes forward to $J\,dV$, so an integral over the current shape can
+be computed over the rest shape: $\int g\, dx = \int G\, J\, dX$. A surface element with normal $N$ and area $dS$
+becomes one with normal $n$ and area $ds$, related by $n\, ds = J\,\mathbf{F}^{-\mathsf{T}} N\, dS$ (Nanson's formula).
+You will not need that last one to write code, but it is how the next chapter converts between the two kinds of
+stress.</p>
+
+<h2>Lagrangian and Eulerian views</h2>
+
+<p>There are two ways to watch a river. You can drop a cork in and follow it, recording its speed as it drifts: that is
+the <b>Lagrangian</b> view, where quantities are functions of the material label $X$. Or you can stand on a bridge and
+record the speed of whatever water happens to pass beneath you: the <b>Eulerian</b> view, where quantities are
+functions of a fixed world position $x$. Particles are Lagrangian; a fixed grid is Eulerian. Hybrid methods like MPM
+carry the material on Lagrangian particles and compute forces on an Eulerian grid, so you will constantly translate
+between the two.</p>
+
+<p>The Eulerian velocity field is the push forward of the Lagrangian velocity: $v(x, t) = V(\phi^{-1}(x, t), t)$. Now
+ask how fast some quantity $f$ changes <i>for the cork</i>. Even if the field is steady at every fixed point, the cork
+moves through it, so</p>
+
+$$\frac{Df}{Dt} = \frac{\partial f}{\partial t} + v \cdot \nabla f.$$
+
+<p>This is the <b>material derivative</b>: the rate of change following the material. The first term is the change at a
+fixed point; the second is the change caused by moving to a point where $f$ is different. An example with numbers: a
+pipe whose water temperature rises steadily along its length by 5 &deg;C per metre, unchanging in time. At a fixed
+point, $\partial T/\partial t = 0$. A blob of water moving along the pipe at 2 m/s warms at
+$DT/Dt = 0 + 2 \times 5 = 10$ &deg;C per second. Acceleration is the material derivative of velocity,
+$a = Dv/Dt = \partial v/\partial t + (\nabla v)\, v$, which is why a steady flow can still accelerate the water in it.
+Particle methods get this term for free, because they literally follow the cork.</p>
+
+<h2>How $\mathbf{F}$ changes in time</h2>
+
+<p>The last piece is the one MPM uses every step. Define the <b>velocity gradient</b> $\nabla v$, the Eulerian twin of
+$\mathbf{F}$:</p>
+
+$$\nabla v = \frac{\partial v}{\partial x} = \begin{pmatrix} \partial v_1/\partial x_1 & \partial v_1/\partial x_2 \\ \partial v_2/\partial x_1 & \partial v_2/\partial x_2 \end{pmatrix}.$$
+
+<p>It says how the velocity differs between nearby points: two points $dx$ apart separate at the rate
+$(\nabla v)\, dx$. Differentiate $\mathbf{F} = \partial\phi/\partial X$ in time with the label fixed, swap the order of
+the derivatives, and use the chain rule through $x = \phi(X, t)$:</p>
+
+$$\frac{\partial \mathbf{F}}{\partial t} = \frac{\partial}{\partial X}\frac{\partial \phi}{\partial t}
+= \frac{\partial V}{\partial X} = \frac{\partial v}{\partial x}\frac{\partial x}{\partial X}
+= (\nabla v)\,\mathbf{F}.$$
+
+<p>In words: the deformation of a neighbourhood grows at the rate set by the velocity differences across it, applied
+to the deformation it already has. Discretise with one explicit Euler step of size $h$, as in the
+<a href="04-time-integration.html">Time Integration</a> chapter, and you get the update that every particle in an MPM
+code performs:</p>
+
+$$\mathbf{F}_{n+1} = (\mathbf{I} + h\,\nabla v)\,\mathbf{F}_n.$$
+
+<p>In MPM, $\nabla v$ comes from the grid, as a weighted sum of grid velocities, $\nabla v_p = \sum_i v_i (\nabla w_{ip})^\mathsf{T}$;
+you will build that in the <a href="25-mpm.html">Material Point Method</a> chapter. In this chapter the demo knows the
+velocity field in closed form, so it can evaluate $\nabla v$ exactly. Four fields to try, with rate $\omega$ (1/s):</p>
+
+<ul>
+<li><b>Rigid rotation</b>, $v = \omega(-x_2, x_1)$, $\nabla v = \begin{pmatrix} 0 & -\omega \\ \omega & 0 \end{pmatrix}$: should leave $J = 1$ and zero strain.</li>
+<li><b>Shear flow</b>, $v = (\omega x_2, 0)$, $\nabla v = \begin{pmatrix} 0 & \omega \\ 0 & 0 \end{pmatrix}$: the exact answer is $\mathbf{F} = \begin{pmatrix} 1 & \omega t \\ 0 & 1 \end{pmatrix}$, area preserved.</li>
+<li><b>Expansion</b>, $v = \omega x$, $\nabla v = \omega\mathbf{I}$: exactly $J = e^{2\omega t}$.</li>
+<li><b>Vortex</b>, $v = \frac{\omega}{1 + r^2/r_0^2}(-x_2, x_1)$: spins fast in the middle and slowly outside. Its divergence $\operatorname{tr}\nabla v$ is zero, so area is preserved, but the differential rotation shears the square into a spiral and the strain grows without limit.</li>
+</ul>
+
+<p>The demo moves each point and its $\mathbf{F}$ with the same explicit step, both using the velocity at the old
+position:</p>
+
+<pre><code class="language-js">for (let k = 0; k &lt; count; k++) {
+  const L = velocityGradient(posX[k], posY[k]);
+  velocity(posX[k], posY[k], vel);
+  integrateF(pointF, k, L, h);       // F &lt;- (I + h L) F
+  posX[k] += h * vel.x;
+  posY[k] += h * vel.y;
+}</code></pre>
+
+<p>Watch the triangles in the vortex. After a turn or two, neighbouring triangles alternate between blue and red,
+even though the points between them stay pale. A triangle's straight edges cannot follow material that is being curved
+and sheared within the size of one triangle, so its corner-based $\mathbf{F}$ goes wrong, while each point's own
+integrated $\mathbf{F}$ stays close to the truth. That is a first hint of why MPM keeps $\mathbf{F}$ on particles instead
+of on a mesh.</p>
+
+<p>The shear flow comes out exact: $\nabla v$ is constant and $\det(\mathbf{I} + h\nabla v) = 1$, so $J$ stays 1 to the
+last digit and $\mathbf{F}_n = \begin{pmatrix} 1 & n h \omega \\ 0 & 1\end{pmatrix}$. The rigid rotation is the
+interesting case, and it is your third exercise.</p>
+
+<div class="note">
+<p><b>The update and the motion agree.</b> For a linear velocity field the position step is
+$x_{n+1} = (\mathbf{I} + h\nabla v)\, x_n$, so $\mathbf{I} + h\nabla v$ is exactly the Jacobian of one step of the point
+motion, and the product of these matrices is exactly the deformation gradient of the discrete motion. Whatever error the
+time integration makes, $\mathbf{F}$ makes the same one, consistently. The colour of the points (their own $J$) and the
+colour of the triangles ($J$ from their corners) therefore agree, which is a good test of your code.</p>
+</div>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>compute F for a triangle</h4>
+<p>Open the starter (<a href="../code/run.html?src=21-deformation/starter.js" target="_blank">run it</a>,
+<a href="../code/21-deformation/starter.js" target="_blank">read it</a>). The square deforms when you move the sliders,
+but every triangle stays the same pale colour, because <code>triangleF</code> returns the identity. Implement it with
+$\mathbf{F} = \mathbf{D}_s\mathbf{D}_m^{-1}$. When it works, the triangles take the colour of $J$ and the readout
+"F of triangle 0" matches "F". Then check it by hand on the 90&deg; example from the text: rest corners
+$(0,0), (2,0), (0,1)$, current corners $(1,1), (1,3), (0,1)$.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>Matrices are stored row by row as <code>[a, b, c, d]</code>. A matrix whose <i>columns</i> are the vectors $e_1$ and
+$e_2$ is therefore <code>[e1.x, e2.x, e1.y, e2.y]</code>.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">function triangleF(X0, X1, X2, x0, x1, x2) {
+  const Dm = [X1.x - X0.x, X2.x - X0.x,
+              X1.y - X0.y, X2.y - X0.y];
+  const Ds = [x1.x - x0.x, x2.x - x0.x,
+              x1.y - x0.y, x2.y - x0.y];
+  return mul(Ds, inverse(Dm));
+}</code></pre>
+<p>The full file is <a href="../code/21-deformation/solution.js" target="_blank">solution.js</a>.</p>
+</details>
+
+<div class="exercise">
+<h4>implement the 2x2 polar decomposition</h4>
+<p>In the starter, <code>polar</code> always returns $\mathbf{R} = \mathbf{I}$. The readouts "R: angle" and "principal
+stretches" are therefore wrong whenever the square is rotated, and the ellipse's arrows point the wrong way. Derive the
+angle yourself before looking at the text again: write $\mathbf{R}(\theta)^\mathsf{T}\mathbf{F}$ out in full and ask
+when it is symmetric. Then check:</p>
+<ol>
+<li>With only the rotation slider moved, the angle readout equals the slider and both stretches are 1.</li>
+<li>With shear 0.5 and nothing else, the angle is $-14.0°$ and the stretches are 1.281 and 0.781.</li>
+<li>$|\mathbf{R}\mathbf{S} - \mathbf{F}|$ is zero for every slider setting, including inverted ones.</li>
+</ol>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>The off-diagonal entries of $\mathbf{R}^\mathsf{T}\mathbf{F}$ are $b\cos\theta + d\sin\theta$ and
+$c\cos\theta - a\sin\theta$. Use <code>Math.atan2</code> rather than <code>Math.atan</code> so that the case
+$a + d \le 0$ (a turn of more than 90&deg;) works.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">function polar(F) {
+  const theta = Math.atan2(F[2] - F[1], F[0] + F[3]);
+  const R = rotation(theta);
+  const S = mul(transpose(R), F);
+  return { R: R, S: S, theta: theta };
+}</code></pre>
+</details>
+
+<div class="exercise">
+<h4>integrate F in a rotating flow</h4>
+<p>Switch the starter to "flow field" with "rigid rotation". The points circle the origin but their colours never change,
+because <code>integrateF</code> is empty. Implement $\mathbf{F} \leftarrow (\mathbf{I} + h\nabla v)\,\mathbf{F}$.</p>
+<ol>
+<li>A rigid rotation should keep $J = 1$ and the strain at zero. Before running it, compute
+$\det(\mathbf{I} + h\nabla v)$ for the rotation field, and predict $J$ after one full revolution at $\omega$ = 1 rad/s and
+$h$ = 16 ms. Write the number down, then measure it (the readout counts steps).</li>
+<li>What is the Green strain then? Explain why it is not zero even though every point is moving on a circle.</li>
+<li>Set $h$ to 300 ms. What happens, and which chapter have you seen this behaviour in before?</li>
+<li>Try the vortex. Its $J$ stays near 1 while the strain grows; why?</li>
+</ol>
+</div>
+
+<details class="hint"><summary>Hint: the prediction</summary>
+<p>$\mathbf{I} + h\nabla v = \begin{pmatrix} 1 & -h\omega \\ h\omega & 1 \end{pmatrix}$ has determinant
+$1 + h^2\omega^2$, and $J$ multiplies by it every step. One revolution takes $2\pi/\omega$ seconds.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">function integrateF(Fs, k, L, h) {
+  const o = 4 * k;
+  const a = Fs[o], b = Fs[o + 1], c = Fs[o + 2], d = Fs[o + 3];
+  const m00 = 1 + h * L[0], m01 = h * L[1], m10 = h * L[2], m11 = 1 + h * L[3];
+  Fs[o] = m00 * a + m01 * c;
+  Fs[o + 1] = m00 * b + m01 * d;
+  Fs[o + 2] = m10 * a + m11 * c;
+  Fs[o + 3] = m10 * b + m11 * d;
+}</code></pre>
+<p>One revolution is $2\pi / 0.016 \approx 393$ steps, so $J = (1 + 0.016^2)^{393} \approx 1.106$: the square has
+gained 11 % in area. $\mathbf{I} + h\nabla v$ is a rotation scaled by $\sqrt{1 + h^2\omega^2}$, so after $n$ steps
+$\mathbf{F} = \sqrt{J}\,\mathbf{R}$ and the Green strain is $\tfrac12(J - 1)\,\mathbf{I}$, with norm about 0.075. The
+points really are spiralling outward: explicit Euler moves each point along the tangent, which always leaves the
+circle, and $\mathbf{F}$ faithfully records that expansion. This is the same growth factor $1 + h^2\omega^2$ that made
+explicit Euler gain energy on a spring in chapter 4. At $h$ = 300 ms the factor is 1.09 per step and $J$ passes 6
+within one revolution. At $h$ = 1 ms the error after one revolution is only 0.6 %: the total drift is
+$n h^2\omega^2 = 2\pi h \omega$, first order in $h$. The vortex's $J$ stays near 1 because its divergence is zero (apart from the
+same explicit drift, strongest in the fast-spinning centre), but neighbouring points circle at different rates, which
+is shear, and shear accumulates without bound.</p>
+<p>In a real MPM simulation this drift does not run away, because the material's elastic forces push back against any
+area change. It is still there, and it is one reason MPM codes sometimes show slow volume gain in fast-spinning
+objects.</p>
+</details>
+
+<div class="paper">
+<h4>the MPM course, section 5</h4>
+<p>Section 5 of Jiang et al.'s course notes, <i>Kinematics Theory</i>, covers this chapter almost line for line, and it
+is a good first section to read in the original. A translation table:</p>
+<table>
+<tr><th>Course notes</th><th>This site</th></tr>
+<tr><td>$\Omega^0$, $\Omega^t$</td><td>the rest shape and the current shape</td></tr>
+<tr><td>$\phi(X, t)$, eq. (1)</td><td>the deformation map</td></tr>
+<tr><td>$V(X,t)$, $A(X,t)$ (capitals: Lagrangian), eqs. (4)-(5)</td><td>velocity and acceleration of a material point</td></tr>
+<tr><td>$v(x,t)$, $a(x,t)$ (lower case: Eulerian), eqs. (10)-(11)</td><td>the pushed-forward fields</td></tr>
+<tr><td>$\mathbf{F} = \partial\phi/\partial X$, $F_{ij} = \partial x_i/\partial X_j$, eqs. (6)-(7)</td><td>the same</td></tr>
+<tr><td>$\partial v/\partial x$</td><td>$\nabla v$</td></tr>
+<tr><td>$\mathbf{f}$ in eq. (22)</td><td>the push forward of $\mathbf{F}$; the notes keep $\mathbf{F}$ for the Lagrangian one</td></tr>
+<tr><td>$\Delta t$</td><td>$h$ (time step)</td></tr>
+</table>
+<ul>
+<li><b>5.1 Continuum Motion</b>: the continuum assumption, $X$ versus $x$, and the translation and rigid examples (eqs. 2 and 3).</li>
+<li><b>5.2 Deformation</b>: $\mathbf{F}$ (eq. 6), its use on nearby points (their Figure 1 is our $dx = \mathbf{F}dX$), $J$ and inversion.</li>
+<li><b>5.3 Push Forward and Pull Back</b>: the change of variables, then eqs. (14)-(18), which show by the chain rule that
+the Eulerian acceleration is <i>not</i> just $\partial v/\partial t$. That "non-intuitive result" is the material
+derivative of our Lagrangian and Eulerian section.</li>
+<li><b>5.4 Material Derivative</b>: eq. (19) defines $D/Dt$, and eqs. (22)-(24) derive $\dot{\mathbf{F}} = (\nabla v)\mathbf{F}$
+exactly as we did. The notes use index notation with the summation convention (a repeated index is summed).</li>
+<li><b>5.5 Volume and Area Change</b>: $dv = J\,dV$ (after eq. 26), the change of variables in integrals (eq. 27) and
+Nanson's formula (eqs. 33-34).</li>
+</ul>
+<p>Two later places use this chapter directly. Section 6.1, eq. (45), introduces the "polar SVD"
+$\mathbf{F} = \mathbf{U}\boldsymbol\Sigma\mathbf{V}^\mathsf{T}$ with rotations $\mathbf{U}$, $\mathbf{V}$, and
+$\mathbf{R} = \mathbf{U}\mathbf{V}^\mathsf{T}$, $\mathbf{S} = \mathbf{V}\boldsymbol\Sigma\mathbf{V}^\mathsf{T}$: our signed
+SVD. And section 9.4 (eqs. 156-162) discretises $\dot{\mathbf{F}} = (\nabla v)\mathbf{F}$ into
+$\mathbf{F}^{n+1}_p = (\mathbf{I} + \Delta t\, \nabla v^{n+1}(x_p))\,\mathbf{F}^n_p$ with $\nabla v$ taken from the grid,
+restated as eq. (181) in section 10.2. That is our update with $h = \Delta t$. One warning for later: in section 8 the
+notes use $h$ for the <i>grid spacing</i>, which this site calls $\Delta x$.</p>
+</div>
+
+<h2>Summary</h2>
+<ul>
+<li>A deforming material has material coordinates $X$ (labels) and world coordinates $x = \phi(X, t)$.</li>
+<li>The deformation gradient $\mathbf{F} = \partial x/\partial X$ maps tiny rest arrows to their current shape,
+$dx = \mathbf{F}\,dX$. Translation leaves it at $\mathbf{I}$; a rigid rotation makes it $\mathbf{R}$.</li>
+<li>$J = \det\mathbf{F}$ is the local area (volume) ratio; $J \lt 0$ means the material is inverted.</li>
+<li>For a linear triangle, $\mathbf{F} = \mathbf{D}_s\mathbf{D}_m^{-1}$ from its edge vectors.</li>
+<li>Green strain $\mathbf{E} = \tfrac12(\mathbf{F}^\mathsf{T}\mathbf{F} - \mathbf{I})$ vanishes for any rotation; the
+linearised strain does not.</li>
+<li>Polar decomposition $\mathbf{F} = \mathbf{R}\mathbf{S}$ with $\theta = \operatorname{atan2}(c - b, a + d)$ in 2D, and
+the signed SVD $\mathbf{F} = \mathbf{U}\boldsymbol\Sigma\mathbf{V}^\mathsf{T}$ whose singular values are the principal
+stretches.</li>
+<li>The material derivative $Df/Dt = \partial f/\partial t + v\cdot\nabla f$ follows the material through an Eulerian field.</li>
+<li>$\dot{\mathbf{F}} = (\nabla v)\mathbf{F}$, discretised as $\mathbf{F}_{n+1} = (\mathbf{I} + h\nabla v)\mathbf{F}_n$, is
+the MPM update. In a rigid rotation it multiplies $J$ by $1 + h^2\omega^2$ per step.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Why is $\mathbf{F} - \mathbf{I}$ a bad measure of deformation, and what is a good one?</li>
+<li>A triangle has rest corners $(0,0), (1,0), (0,1)$ and current corners $(0,0), (3,0), (1,0.5)$. What are
+$\mathbf{F}$ and $J$, and has the triangle been inverted?</li>
+<li>In the polar decomposition, which factor would you use to rotate a texture painted on the material, and which to
+measure how much it is stretched?</li>
+<li>Water flows steadily through a narrowing pipe. At every fixed point the velocity never changes. Does the water
+accelerate? Which term of the material derivative says so?</li>
+<li>Why does the explicit update $\mathbf{F}_{n+1} = (\mathbf{I} + h\nabla v)\mathbf{F}_n$ make a rigidly spinning
+object grow, and how does the growth depend on $h$?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

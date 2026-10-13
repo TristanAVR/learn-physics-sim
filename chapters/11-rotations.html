@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rotations and Rigid Bodies · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="11-rotations" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Rotations and Rigid Bodies</h1>
+<p class="subtitle">Things with size can turn. How to store that turning, integrate it, and constrain it, first in 2D and
+then in 3D.</p>
+
+<p>So far everything has been a particle: a point with a position and a velocity. A chain of particles can bend, but
+each bead has no orientation of its own, so there is nothing for a bead to twist or point. Rods, which are the subject
+of the next three chapters, need exactly that: a direction along the rod and a direction across it at every point, so
+that bending and twisting have something to act on. The tool for that is the <b>rigid body</b>, an object that has a
+size, a mass distribution and an orientation, and can rotate as well as move.</p>
+
+<p>In 2D, an orientation is one angle and everything is easy. In 3D, orientation is genuinely tricky: rotations do not
+commute, three angles are not a good way to store them, and a spinning object can change its axis of rotation with no
+torque acting on it at all. This chapter goes through both, in that order.</p>
+
+<p>By the end you will be able to integrate a 2D rigid body, hit it off-centre and predict its spin, join bodies with
+XPBD pin joints that rotate them correctly, store and integrate a 3D orientation as a quaternion, and explain why a
+box spun about its middle axis flips over.</p>
+
+<h2>A rigid body in 2D</h2>
+
+<p>A rigid body is a set of points that keep their distances to each other. That leaves very few ways for it to move:
+its <b>centre of mass</b> $\mathbf{x}$ can translate, and the body can rotate about it by an angle $\theta$. A point
+fixed in the body, at position $\bar{\mathbf{r}}$ in the body's own coordinates (its <i>body frame</i>), is at</p>
+
+$$\mathbf{p} = \mathbf{x} + \mathbf{R}(\theta)\,\bar{\mathbf{r}},
+\qquad \mathbf{R}(\theta) = \begin{pmatrix} \cos\theta &amp; -\sin\theta \\ \sin\theta &amp; \cos\theta \end{pmatrix}$$
+
+<p>in the world. Write $\mathbf{r} = \mathbf{R}\bar{\mathbf{r}}$ for the same lever arm in world coordinates. The state
+of the body is four numbers plus their rates: position $\mathbf{x}$, angle $\theta$, velocity $\mathbf{v}$, and
+<b>angular velocity</b> $\omega = \dot\theta$ in radians per second. The velocity of the point is</p>
+
+$$\dot{\mathbf{p}} = \mathbf{v} + \omega\,\mathbf{r}^\perp, \qquad \mathbf{r}^\perp = (-r_y,\ r_x),$$
+
+<p>the centre's velocity plus the rotation, which moves the point perpendicular to its lever arm.</p>
+
+<p>A force $\mathbf{F}$ applied at the point does two things. It accelerates the centre of mass exactly as if it were
+applied there, $m\dot{\mathbf{v}} = \mathbf{F}$, and it creates a <b>torque</b> about the centre of mass,</p>
+
+$$\tau = \mathbf{r}\times\mathbf{F} = r_x F_y - r_y F_x ,$$
+
+<p>the 2D cross product, a scalar. Torque is to rotation what force is to translation: $I\dot\omega = \tau$, where $I$
+is the <b>moment of inertia</b>, the body's resistance to angular acceleration, in kg m<sup>2</sup>. Integrating the
+two together, with symplectic Euler from <a href="04-time-integration.html">chapter 4</a>, is two pairs of lines:</p>
+
+<pre><code class="language-js">body.vx += h * Fx / body.mass;    body.vy += h * Fy / body.mass;
+body.omega += h * torque / body.inertia;
+body.x += h * body.vx;            body.y += h * body.vy;
+body.theta += h * body.omega;</code></pre>
+
+<p>In 2D the angle is an ordinary number and adding $h\omega$ to it is exact for the rotation part. Enjoy it while it
+lasts.</p>
+
+<h2>The moment of inertia</h2>
+
+<p>For a collection of point masses $m_i$ at distances $d_i$ from the axis, $I = \sum_i m_i d_i^2$; for a continuous
+body, $I = \int d^2\,dm$. Mass far from the axis counts quadratically more, which is why a figure skater spins faster
+when they pull their arms in.</p>
+
+<p>A thin rod of mass $m$ and length $L$, about its centre: put the rod along $s \in [-L/2, L/2]$ with mass per length
+$m/L$. Then</p>
+
+$$I_{\text{centre}} = \int_{-L/2}^{L/2} \frac{m}{L}\,s^2\,ds = \frac{m}{L}\,\frac{s^3}{3}\Big|_{-L/2}^{L/2} = \frac{mL^2}{12}.$$
+
+<table>
+<tr><th>Body</th><th>Axis</th><th>Moment of inertia</th></tr>
+<tr><td>thin rod, length $L$</td><td>centre, perpendicular to the rod</td><td>$mL^2/12$</td></tr>
+<tr><td>solid rectangle, sides $w \times d$</td><td>centre, perpendicular to the plane</td><td>$m(w^2 + d^2)/12$</td></tr>
+<tr><td>solid disk, radius $r$</td><td>centre, perpendicular to the disk</td><td>$mr^2/2$</td></tr>
+<tr><td>thin ring, radius $r$</td><td>centre, perpendicular to the ring</td><td>$mr^2$</td></tr>
+<tr><td>solid box, sides $2a \times 2b \times 2c$</td><td>centre, along the $2a$ side</td><td>$m(b^2 + c^2)/3$</td></tr>
+</table>
+
+<p>Moments of inertia about other axes follow from the <b>parallel axis theorem</b>: about an axis parallel to one
+through the centre of mass, at distance $d$ from it, $I = I_{\text{cm}} + md^2$. You will use it in the last exercise to
+get the rod's moment of inertia about its end.</p>
+
+<p>The bars in this chapter's demo are 0.5 m long, 6 cm thick and weigh 1 kg. As rectangles they have $I = 1 \times
+(0.5^2 + 0.06^2)/12 = 0.02113$ kg m<sup>2</sup>, a little above the thin-rod value of 0.02083.</p>
+
+<h2>Hitting a body off-centre</h2>
+
+<p>Collisions and joints act through very short, very strong forces, so it is convenient to work with their
+time integral, the <b>impulse</b> $\mathbf{J} = \int\mathbf{F}\,dt$ in N s. An impulse at a point changes the
+velocities instantly:</p>
+
+$$\Delta\mathbf{v} = \frac{\mathbf{J}}{m}, \qquad \Delta\omega = \frac{\mathbf{r}\times\mathbf{J}}{I}.$$
+
+<p>Hit the end of a demo bar with 0.5 N s perpendicular to it: the centre moves off at $0.5$ m/s, and the bar spins
+at $0.5 \times 0.25/0.02113 = 5.91$ rad/s. Now ask how fast the <i>point that was hit</i> moves along $\hat{\mathbf{J}}$,
+the direction of the impulse. Its velocity change is $\Delta\mathbf{v} + \Delta\omega\,\mathbf{r}^\perp$, and its
+component along $\hat{\mathbf{J}}$ works out as</p>
+
+$$\Delta\dot{\mathbf{p}}\cdot\hat{\mathbf{J}} = |\mathbf{J}|\left(\frac1m + \frac{(\mathbf{r}\times\hat{\mathbf{J}})^2}{I}\right).$$
+
+<p>The bracket is an inverse mass: it says how much the point gives per unit of impulse in that direction. Call it the
+<b>generalised inverse mass</b> of the body at that point along that direction,</p>
+
+$$w = \frac1m + \frac{(\mathbf{r}\times\mathbf{n})^2}{I}.$$
+
+<p>At the end of a demo bar, pushed sideways, $w = 1 + 0.25^2/0.02113 = 3.96$ kg<sup>-1</sup>: the end feels like a
+mass of 0.25 kg, a quarter of the bar, because pushing it also turns the bar. Pushed along the bar, $\mathbf{r}\times
+\mathbf{n} = 0$ and the end feels the full kilogram. This one quantity is all XPBD needs to handle rigid bodies.</p>
+
+<p>The demo below joins bars end to end with pin joints, hangs the chain from a fixed point and drops it from
+horizontal. Drag any bar with the mouse. The other scenes are a single bar released from 10 degrees, which times its
+own swing, and a free bar in zero gravity for the impulse test.</p>
+
+<div class="demo" data-src="11-rotations/solution.js" data-height="520"
+     data-caption="Rigid bars joined by XPBD pin joints, with substeps. Drag a bar; the plot shows the total energy."></div>
+
+<h2>XPBD joints for rigid bodies</h2>
+
+<p>A pin joint says that a point $\bar{\mathbf{r}}_A$ on body $A$ and a point $\bar{\mathbf{r}}_B$ on body $B$ are in the
+same place. As a constraint, with world points $\mathbf{p}_A$, $\mathbf{p}_B$,</p>
+
+$$C = |\mathbf{p}_B - \mathbf{p}_A|, \qquad \mathbf{n} = \frac{\mathbf{p}_B - \mathbf{p}_A}{|\mathbf{p}_B - \mathbf{p}_A|}.$$
+
+<p>This is chapter 8's distance constraint with rest length zero, between two points that are not particles. M&uuml;ller,
+Macklin, Chentanez, Jeschke and Kim, in <i>Detailed Rigid Body Simulation with Extended Position Based Dynamics</i>
+(2020), handle it the way you would hope. Think of the correction as a <b>positional impulse</b> $\mathbf{p} =
+\Delta\lambda\,\mathbf{n}$ applied at the joint point, an impulse measured in kg m instead of kg m/s. Exactly like a
+velocity impulse, it moves and turns each body:</p>
+
+$$\Delta\mathbf{x}_B = \frac{\mathbf{p}}{m_B}, \qquad \Delta\theta_B = \frac{\mathbf{r}_B\times\mathbf{p}}{I_B}, \qquad
+\Delta\mathbf{x}_A = -\frac{\mathbf{p}}{m_A}, \qquad \Delta\theta_A = -\frac{\mathbf{r}_A\times\mathbf{p}}{I_A}.$$
+
+<p>The joint points then move towards each other along $\mathbf{n}$ by $\Delta\lambda\,(w_A + w_B)$, with the
+generalised inverse masses from the last section. Asking for that to cancel $C$, plus compliance, gives the familiar
+XPBD update with the familiar denominator:</p>
+
+$$\Delta\lambda = \frac{-C - \tilde\alpha\,\lambda}{w_A + w_B + \tilde\alpha},
+\qquad w_A = \frac{1}{m_A} + \frac{(\mathbf{r}_A\times\mathbf{n})^2}{I_A}.$$
+
+<p>For a particle, $I$ is irrelevant and $w = 1/m$: rigid bodies are a strict extension of everything so far. A fixed
+anchor has $w = 0$. In code:</p>
+
+<pre><code class="language-js">function solvePointConstraint(A, pa, B, pb, alphaTilde) {
+  const dx = pb.x - pa.x, dy = pb.y - pa.y, c = Math.hypot(dx, dy);
+  if (c &lt; 1e-12) return;
+  const nx = dx / c, ny = dy / c;
+  let wA = 0, wB = 0, rAn = 0, rBn = 0;
+  if (A) { rAn = (pa.x - A.x) * ny - (pa.y - A.y) * nx; wA = A.invMass + rAn * rAn * A.invInertia; }
+  if (B) { rBn = (pb.x - B.x) * ny - (pb.y - B.y) * nx; wB = B.invMass + rBn * rBn * B.invInertia; }
+  const dLambda = -c / (wA + wB + alphaTilde);       // one visit per substep, so lambda = 0 here
+  if (A) { A.x -= A.invMass * dLambda * nx; A.y -= A.invMass * dLambda * ny; A.theta -= A.invInertia * rAn * dLambda; }
+  if (B) { B.x += B.invMass * dLambda * nx; B.y += B.invMass * dLambda * ny; B.theta += B.invInertia * rBn * dLambda; }
+}</code></pre>
+
+<p>Here <code>rAn</code> is $\mathbf{r}_A\times\mathbf{n}$, so <code>A.invInertia * rAn * dLambda</code> is $(\mathbf{r}_A
+\times\mathbf{p})/I_A$. The step around it is the XPBD loop with substeps from <a href="09-substepping.html">chapter
+9</a>, extended to angles: predict $\theta \mathrel{+}= h_s\,\omega$ along with the position, solve the joints, then
+recover $\omega = (\theta - \theta_{\text{prev}})/h_s$ along with the velocity.</p>
+
+<p>How good is it? Choose the pendulum scene: one bar pinned at its end, released from 10 degrees. Its period, with the
+moment of inertia about the pivot that you will derive in the exercises, is 1.1603 s for small swings, or 1.1625 s
+corrected for the 10 degree amplitude. The demo measures 1.1613 s with 5 substeps, 1.1619 s with 20 and 1.1621 s with
+40, within 0.1 % of the exact value; the small remainder is the numerical damping of the method. With a single substep
+the bar visibly jitters on its pivot and the timing fails. As in chapter 9, run rigid bodies with substeps.</p>
+
+<div class="note">
+<p><b>Why a joint turns the bodies the right amount.</b> The ratio between the translation and rotation of each body is
+set by $1/m$ versus $(\mathbf{r}\times\mathbf{n})^2/I$, the same split an impulse at that point would cause. A
+position-level correction that respected only the masses, ignoring the inertia, would weld the bars together:
+try it in the starter, where the joints treat bars as point masses and the chain sticks out sideways like a stiff
+beam.</p>
+</div>
+
+<h2>Orientation in 3D</h2>
+
+<p>In 3D, a rotation can be about any axis, and that changes everything. Rotate a book 90 degrees about a vertical
+axis and then 90 degrees about a horizontal one; now do it in the other order. The book ends up in different
+orientations. Rotations do not commute, so there is no way to store an orientation as three angles you can simply add
+to. There are four common representations, each good at something.</p>
+
+<p><b>Rotation matrices.</b> A 3&times;3 matrix $\mathbf{R}$ whose columns are the body's three axes written in world
+coordinates. It maps body coordinates to world coordinates, $\mathbf{r} = \mathbf{R}\bar{\mathbf{r}}$, and composes by
+multiplication. It is orthonormal ($\mathbf{R}^T\mathbf{R} = \mathbf{I}$, so its inverse is its transpose) with
+$\det\mathbf{R} = 1$. That is nine numbers for three degrees of freedom, and after many small updates rounding makes the
+columns drift away from orthonormal, so the matrix has to be re-orthonormalised from time to time.</p>
+
+<p><b>Euler angles.</b> Three angles applied in a fixed sequence of axes, for example yaw about $z$, then pitch about
+$y$, then roll about $x$. They are compact and easy for a human to read, and bad for simulation. When the pitch reaches
+90 degrees, the first and last rotations turn about the same axis, so two of the three angles do the same thing and one
+degree of freedom is gone: <b>gimbal lock</b>. Near that configuration a small physical rotation needs large, fast
+changes of the angles, and interpolating two orientations by interpolating their angles takes strange, wobbly paths.</p>
+
+<p><b>Axis-angle and the rotation vector.</b> Every rotation is a turn by some angle $\varphi$ about some unit axis
+$\hat{\mathbf{a}}$ (Euler's rotation theorem). Packing both into one vector gives the <b>rotation vector</b>
+$\boldsymbol\phi = \varphi\,\hat{\mathbf{a}}$, three numbers for three degrees of freedom. It is the natural
+representation for small rotations and rates: an angular velocity $\boldsymbol\omega$ is a rotation vector per second,
+and $h\boldsymbol\omega$ is the rotation during one step. Composing two finite rotation vectors, though, has no simple
+formula.</p>
+
+<p><b>Quaternions.</b> A quaternion is four numbers, $q = (w, x, y, z)$, written as a scalar part and a vector part,
+$q = (s, \mathbf{u})$. The rotation by $\varphi$ about $\hat{\mathbf{a}}$ is the <b>unit</b> quaternion</p>
+
+$$q = \left(\cos\frac{\varphi}{2},\ \sin\frac{\varphi}{2}\,\hat{\mathbf{a}}\right), \qquad |q| = 1.$$
+
+<p>Quaternions multiply by the rule</p>
+
+$$(s_1, \mathbf{u}_1)(s_2, \mathbf{u}_2) = \bigl(s_1 s_2 - \mathbf{u}_1\cdot\mathbf{u}_2,\ \ s_1\mathbf{u}_2 + s_2\mathbf{u}_1 + \mathbf{u}_1\times\mathbf{u}_2\bigr),$$
+
+<p>which is not commutative, because of the cross product, exactly like rotations. With the conjugate $q^* = (s,
+-\mathbf{u})$, which is the inverse of a unit quaternion:</p>
+
+<ul>
+<li><b>Rotating a vector:</b> treat $\mathbf{v}$ as $(0, \mathbf{v})$; then $\mathbf{R}\mathbf{v}$ is the vector part of
+$q\,(0, \mathbf{v})\,q^*$.</li>
+<li><b>Composing:</b> rotating by $q_1$ and then by $q_2$ is the single rotation $q_2 q_1$.</li>
+<li><b>Normalising:</b> after an update, divide by $|q|$. Four numbers and one square root, far cheaper and simpler than
+re-orthonormalising a matrix.</li>
+<li><b>Double cover:</b> $q$ and $-q$ are the same rotation (turning by $\varphi + 2\pi$ flips the sign of both parts).
+Remember it when comparing or interpolating two quaternions: pick the sign that makes their dot product positive.</li>
+<li><b>Interpolation:</b> moving along the great circle between two unit quaternions (<i>slerp</i>) rotates at a
+constant rate about a fixed axis, the shortest path between the orientations, with no gimbal effects.</li>
+</ul>
+
+<p>The rule of thumb used by most simulators: store orientation as a unit quaternion, convert to a matrix when you need
+to transform many vectors, and use rotation vectors for angular velocities and small corrections.</p>
+
+<h2>The exponential and logarithm maps</h2>
+
+<p>The formula $q = (\cos(\varphi/2), \sin(\varphi/2)\,\hat{\mathbf{a}})$ turns a rotation vector into a quaternion.
+It is called the <b>exponential map</b>, because it really is the quaternion exponential of $(0,
+\boldsymbol\phi/2)$:</p>
+
+$$\exp(\boldsymbol\phi) = \left(\cos\frac{|\boldsymbol\phi|}{2},\ \ \sin\frac{|\boldsymbol\phi|}{2}\,
+\frac{\boldsymbol\phi}{|\boldsymbol\phi|}\right) \approx \left(1,\ \frac{\boldsymbol\phi}{2}\right)\ \text{for small }\boldsymbol\phi.$$
+
+<p>Its inverse, the <b>logarithm map</b>, recovers the rotation vector of a unit quaternion $q = (s, \mathbf{u})$:</p>
+
+$$\log(q) = 2\,\operatorname{atan2}(|\mathbf{u}|, s)\,\frac{\mathbf{u}}{|\mathbf{u}|}.$$
+
+<p>(Pick the sign of $q$ with $s \ge 0$ first, so that the angle comes out between 0 and $\pi$.) The pair is how you
+move between "rates and small differences" and "orientations". A body turning at a constant world angular velocity
+$\boldsymbol\omega$ for a time $h$ ends up at exactly</p>
+
+$$q_{n+1} = \exp(h\boldsymbol\omega)\,q_n,$$
+
+<p>and given two orientations, the angular velocity that takes one to the other in time $h$ is
+$\boldsymbol\omega = \log(q_{n+1}q_n^*)/h$.</p>
+
+<h2>Integrating an orientation</h2>
+
+<p>Differentiate $q(t) = \exp(t\boldsymbol\omega)\,q_0$ at $t = 0$, using the small-angle form, and you get the
+equation of motion of a quaternion:</p>
+
+$$\dot q = \tfrac12\,(0, \boldsymbol\omega)\,q ,$$
+
+<p>with $\boldsymbol\omega$ in world coordinates. (With $\boldsymbol\omega$ in body coordinates, the product goes on the
+other side: $\dot q = \tfrac12 q\,(0, \bar{\boldsymbol\omega})$.) One explicit Euler step of it, followed by
+normalisation, is the update almost every simulator uses:</p>
+
+$$q \leftarrow \operatorname{normalize}\!\left(q + \frac{h}{2}\,(0, \boldsymbol\omega)\,q\right).$$
+
+<p>It is first-order accurate, and the normalisation keeps it on the unit sphere. For the small rotations of a
+substep that is plenty; when the rotation per step is large, use $\exp(h\boldsymbol\omega)\,q$ instead. The reverse
+operation, recovering the angular velocity after an XPBD solve, is the small-angle logarithm:</p>
+
+$$\Delta q = q\,q_{\text{prev}}^*, \qquad \boldsymbol\omega = \frac{2}{h}\,(\Delta q_x, \Delta q_y, \Delta q_z),
+\qquad\text{negated if } \Delta q_w \lt 0.$$
+
+<h2>The inertia tensor and Euler's equations</h2>
+
+<p>In 3D, the moment of inertia becomes a 3&times;3 symmetric matrix $\mathbf{I}$, the <b>inertia tensor</b>, and the
+angular momentum $\mathbf{L} = \mathbf{I}\boldsymbol\omega$ is generally <i>not</i> parallel to $\boldsymbol\omega$. Every
+rigid body has three perpendicular <b>principal axes</b> in which its tensor is diagonal, $\bar{\mathbf{I}} =
+\operatorname{diag}(I_1, I_2, I_3)$; for a box they are its edges, with the moments from the table above. That diagonal
+form lives in the body frame. In the world frame the tensor turns with the body:</p>
+
+$$\mathbf{I}_{\text{world}} = \mathbf{R}\,\bar{\mathbf{I}}\,\mathbf{R}^T, \qquad
+\mathbf{I}_{\text{world}}^{-1} = \mathbf{R}\,\bar{\mathbf{I}}^{-1}\mathbf{R}^T.$$
+
+<p>Newton's law for rotation says $d\mathbf{L}/dt = \boldsymbol\tau$ in the world frame. But $\mathbf{L} =
+\mathbf{I}_{\text{world}}\boldsymbol\omega$, and $\mathbf{I}_{\text{world}}$ changes as the body turns. Writing the law
+in the body frame, where the tensor is constant, picks up one extra term:</p>
+
+$$\bar{\mathbf{I}}\,\dot{\bar{\boldsymbol\omega}} + \bar{\boldsymbol\omega}\times(\bar{\mathbf{I}}\,\bar{\boldsymbol\omega}) = \bar{\boldsymbol\tau}.$$
+
+<p>These are <b>Euler's equations</b>, and $\bar{\boldsymbol\omega}\times\bar{\mathbf{I}}\bar{\boldsymbol\omega}$ is the
+<b>gyroscopic term</b>. It vanishes when the body spins about a principal axis, because then $\bar{\mathbf{I}}\bar
+{\boldsymbol\omega}$ is parallel to $\bar{\boldsymbol\omega}$. Otherwise, even with zero torque, the angular velocity
+changes: the angular momentum is fixed in space, and the body tumbles around it. Integrating it explicitly is one line
+per component, before the quaternion update:</p>
+
+<pre><code class="language-js">// body-frame angular velocity wb, principal moments I[0..2], no torque
+const Iw = [I[0] * wb[0], I[1] * wb[1], I[2] * wb[2]];
+const gyro = cross(wb, Iw);
+for (let k = 0; k &lt; 3; k++) wb[k] -= h * gyro[k] / I[k];</code></pre>
+
+<h2>The tennis racket</h2>
+
+<p>Take a box of 1.0 &times; 0.6 &times; 0.2 m and 1 kg. Its principal moments are $I_1 = 0.0333$, $I_2 = 0.0867$ and
+$I_3 = 0.1133$ kg m<sup>2</sup>, about its long, middle and short edges. Spin it at $\Omega$ about one of them, with a
+tiny extra rotation $\omega_j, \omega_k$ about the other two. For a spin about axis 2, Euler's equations with no torque
+read, to first order in the small components,</p>
+
+$$I_1\dot\omega_1 = (I_2 - I_3)\,\Omega\,\omega_3, \qquad I_3\dot\omega_3 = (I_1 - I_2)\,\Omega\,\omega_1 .$$
+
+<p>Differentiate the first and substitute the second:</p>
+
+$$\ddot\omega_1 = \Omega^2\,\frac{(I_3 - I_2)(I_2 - I_1)}{I_1 I_3}\,\omega_1 .$$
+
+<p>When $I_2$ is the intermediate moment, both brackets are positive, and the solution grows exponentially, like
+$e^{\sigma t}$ with</p>
+
+$$\sigma = \Omega\sqrt{\frac{(I_3 - I_2)(I_2 - I_1)}{I_1 I_3}} .$$
+
+<p>For a spin about the smallest or the largest axis, the same calculation gives a negative coefficient: the small
+components oscillate, a wobble, and the spin is stable. This is the <b>intermediate axis theorem</b>, also called the
+tennis racket theorem: toss a racket spinning about the axis in the plane of its face and perpendicular to its handle,
+and it makes a half-turn about the handle every time it comes round.</p>
+
+<p>For our box at $\Omega$ = 4 rad/s, $\sigma = 0.614\,\Omega = 2.45$ s<sup>-1</sup>. A perturbation of one part in a
+thousand grows to the size of the spin itself after about $\ln(1000)/\sigma = 2.8$ s, and then the box flips. The demo
+measures the growth rate while the perturbation is still small: 2.47 s<sup>-1</sup>. Switch to the stable axes and it
+reports the predicted wobble frequency, $\Omega\sqrt{(I_k - I_j)(I_k - I_l)/(I_j I_l)}$: 2.636 rad/s about the long axis
+and 3.437 rad/s about the short one. The simulation's wobble has 2.636 and 3.440 rad/s.</p>
+
+<div class="demo" data-src="11-rotations/tumble.js" data-height="500"
+     data-caption="A torque-free box spun about its intermediate axis. Plot: the body-frame angular velocity components divided by the spin rate."></div>
+
+<p>Watch the plot: the green component, the spin about the intermediate axis, sits at +1, then swings to -1 and back,
+again and again, while the dashed line, the angular momentum, stays fixed in space. Untick "gyroscopic term" and
+nothing happens at all: without that term, the body keeps whatever angular velocity it has, which is wrong for
+any spin that is not exactly about a principal axis.</p>
+
+<div class="warning">
+<p><b>Explicit gyroscopics gain energy.</b> The explicit update above is not energy-conserving. With 20 substeps per
+frame the box gains 1.2 % of its kinetic energy over 20 seconds, and with 5 substeps 5 %; the readouts show it. For
+games that is usually fine. For long runs or fast spins, treat the gyroscopic term implicitly (one Newton step on Euler's
+equations), or rescale $\bar{\boldsymbol\omega}$ after each step so that the energy and $|\mathbf{L}|$ stay at their
+initial values.</p>
+</div>
+
+<h2>XPBD rigid bodies in 3D</h2>
+
+<p>Everything from the 2D joint carries over, with vectors in place of scalars. The generalised inverse mass of body
+$A$ at lever arm $\mathbf{r}_A$ along $\mathbf{n}$ is</p>
+
+$$w_A = \frac{1}{m_A} + (\mathbf{r}_A\times\mathbf{n})^T\,\mathbf{I}_A^{-1}\,(\mathbf{r}_A\times\mathbf{n}),$$
+
+<p>with the world-frame inverse inertia. After computing $\Delta\lambda$ exactly as before, the positional impulse
+$\mathbf{p} = \Delta\lambda\,\mathbf{n}$ updates position and orientation:</p>
+
+$$\mathbf{x}_A \leftarrow \mathbf{x}_A - \frac{\mathbf{p}}{m_A}, \qquad
+q_A \leftarrow \operatorname{normalize}\!\left(q_A - \tfrac12\,\bigl(0,\ \mathbf{I}_A^{-1}(\mathbf{r}_A\times\mathbf{p})\bigr)\,q_A\right),$$
+
+<p>and with the opposite signs for body $B$. The orientation update is the quaternion integration step with the
+rotation vector $\mathbf{I}^{-1}(\mathbf{r}\times\mathbf{p})$ in place of $h\boldsymbol\omega$. A ball joint is one such
+positional constraint. A hinge adds an <i>angular</i> constraint that aligns an axis on $A$ with an axis on $B$: its
+correction is a pure rotation $\Delta\boldsymbol\phi = \Delta\lambda\,\mathbf{n}$ about some axis $\mathbf{n}$, with
+generalised inverse mass $\mathbf{n}^T\mathbf{I}^{-1}\mathbf{n}$, and the same update without the translation. The paper
+builds every joint type, and contacts with friction, from these two building blocks, inside the substep loop of chapter
+9.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>let the bars rotate</h4>
+<p>Open the starter (<a href="../code/run.html?src=11-rotations/starter.js" target="_blank">run it</a>,
+<a href="../code/11-rotations/starter.js" target="_blank">read it</a>). The bars cannot turn: <code>substep</code> never
+updates the angle, and <code>solvePointConstraint</code> treats each bar as a point mass at its centre. The result is a
+chain that sticks straight out from its pivot like a welded beam. Fix both:</p>
+<ol>
+<li>In <code>substep</code>, predict the angle with the angular velocity, and recover the angular velocity from the
+change in angle.</li>
+<li>In <code>solvePointConstraint</code>, use the generalised inverse mass $w = 1/m + (\mathbf{r}\times\mathbf{n})^2/I$
+for each body, and rotate each body by $(\mathbf{r}\times\mathbf{p})/I$.</li>
+</ol>
+<p>When it works, the chain falls and swings like the demo, and you can drag it around.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>The lever arm is the world joint point minus the body's centre: <code>pa.x - A.x</code>, <code>pa.y - A.y</code>. The
+2D cross product $\mathbf{r}\times\mathbf{n}$ is <code>rx * ny - ry * nx</code>. Body $B$ moves along $+\mathbf{p}$ and
+body $A$ along $-\mathbf{p}$, and their rotations have the same signs as their translations.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Compare with <a href="../code/11-rotations/solution.js" target="_blank">solution.js</a>. The angle lines are
+<code>b.theta += h * b.omega;</code> and <code>b.omega = (b.theta - b.ptheta) / h;</code>. The joint:</p>
+<pre><code class="language-js">let wA = 0, wB = 0, rAn = 0, rBn = 0;
+if (A) { rAn = (pa.x - A.x) * ny - (pa.y - A.y) * nx; wA = A.invMass + rAn * rAn * A.invInertia; }
+if (B) { rBn = (pb.x - B.x) * ny - (pb.y - B.y) * nx; wB = B.invMass + rBn * rBn * B.invInertia; }
+const dLambda = -c / (wA + wB + alphaTilde);
+if (A) {
+  A.x -= A.invMass * dLambda * nx; A.y -= A.invMass * dLambda * ny;
+  A.theta -= A.invInertia * rAn * dLambda;
+}
+if (B) {
+  B.x += B.invMass * dLambda * nx; B.y += B.invMass * dLambda * ny;
+  B.theta += B.invInertia * rBn * dLambda;
+}</code></pre>
+</details>
+
+<div class="exercise">
+<h4>hit a bar off-centre</h4>
+<p>Choose the free bar scene. The kick button applies 0.5 N s straight up at the bar's right end, through
+<code>applyImpulse</code>, which so far only changes the linear velocity. Before you fix it, predict the speed and spin
+after one kick, first treating the bar as a thin rod and then with its 6 cm thickness. Add the angular part, then kick
+once and compare with the readout. Bonus: where along the bar would you have to hit it so that its <i>left</i> end
+starts with zero velocity?</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>$\Delta v = J/m$ and $\Delta\omega = rJ/I$ with $r = L/2$. For the bonus, the left end's velocity is $\Delta v -
+\Delta\omega\,L/2$ for a hit at distance $d$ to the right of the centre, with $\Delta\omega = dJ/I$.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">const rx = px - body.x, ry = py - body.y;
+body.omega += (rx * jy - ry * jx) * body.invInertia;</code></pre>
+<p>Speed 0.5 m/s either way. Thin rod: $\omega = 0.5 \times 0.25/(1 \times 0.5^2/12) = 6$ rad/s, or $6J/(mL)$. With
+thickness, $I = 0.02113$ kg m<sup>2</sup> and $\omega = 5.915$ rad/s, which the demo shows. Bonus: zero velocity at the
+left end needs $J/m = (dJ/I)(L/2)$, so $d = 2I/(mL) = L/6$ for a thin rod: hit it two thirds of the way along from the
+end you want to stay still. That point is the <i>centre of percussion</i>, the sweet spot of a bat or a racket.</p>
+</details>
+
+<div class="exercise">
+<h4>integrate a quaternion and watch the flip</h4>
+<p>Open the tumbling box starter (<a href="../code/run.html?src=11-rotations/tumble-starter.js" target="_blank">run
+it</a>, <a href="../code/11-rotations/tumble-starter.js" target="_blank">read it</a>). The box does not move. First
+implement the quaternion update $q \leftarrow \operatorname{normalize}(q + \tfrac{h}{2}(0, \boldsymbol\omega)q)$ in
+<code>integrate</code>: the box should spin steadily about its green axis, and never flip. Then add the gyroscopic term
+and watch the flips start. Compare the measured growth rate with $\sigma$, try the two stable axes, and find out how the
+time to the first flip changes when you make the perturbation ten times smaller.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>The helpers <code>qmul</code> and <code>qnormalize</code> exist. Build the pure quaternion
+<code>{ w: 0, x: omegaW[0], y: omegaW[1], z: omegaW[2] }</code>, multiply it by <code>q</code> (in that order, because
+<code>omegaW</code> is in world coordinates), scale by $h/2$, add to <code>q</code> component by component, and normalise.
+For the time to the first flip, remember that the perturbation grows like $e^{\sigma t}$.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Compare with <a href="../code/11-rotations/tumble.js" target="_blank">tumble.js</a>:</p>
+<pre><code class="language-js">const Iw = [inertia[0] * wb[0], inertia[1] * wb[1], inertia[2] * wb[2]];
+const gyro = cross(wb, Iw);
+wb = [wb[0] - h * gyro[0] / inertia[0], wb[1] - h * gyro[1] / inertia[1], wb[2] - h * gyro[2] / inertia[2]];
+omegaW = qrotate(q, wb);
+const dq = qmul({ w: 0, x: omegaW[0], y: omegaW[1], z: omegaW[2] }, q);
+q = qnormalize({ w: q.w + 0.5 * h * dq.w, x: q.x + 0.5 * h * dq.x, y: q.y + 0.5 * h * dq.y, z: q.z + 0.5 * h * dq.z });</code></pre>
+<p>A perturbation ten times smaller needs $\ln(10)/\sigma = 0.94$ s longer to grow to the same size, at $\Omega$ = 4
+rad/s. The flip is delayed but never prevented: any perturbation at all, including rounding error, eventually flips the
+box.</p>
+</details>
+
+<div class="exercise">
+<h4>derive the moment of inertia of a rod about its end</h4>
+<p>On paper, compute the moment of inertia of a thin rod of mass $m$ and length $L$ about one end, twice: once by
+integrating $\int s^2\,dm$ over $s \in [0, L]$, and once from $mL^2/12$ with the parallel axis theorem. Then use it to
+predict the small-swing period of a rod pivoted at its end, $T = 2\pi\sqrt{I/(m g d)}$, where $d$ is the distance from
+the pivot to the centre of mass. Predict the period for the demo's bar (0.5 m, treat it as thin first, then include the
+6 cm thickness), and check it with the pendulum scene. Then try fewer substeps.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>$\int_0^L (m/L) s^2\,ds$. For the parallel axis theorem, the centre is $d = L/2$ from the end. In the period, the
+rod's length cancels against itself except for one factor: $T = 2\pi\sqrt{2L/(3g)}$.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Both routes give $I_{\text{end}} = mL^2/3$: the integral is $(m/L)\,L^3/3$, and $mL^2/12 + m(L/2)^2 = mL^2/3$. The
+thin-rod period is $2\pi\sqrt{2 \times 0.5/(3 \times 9.81)} = 1.1582$ s. With thickness, $I_{\text{end}} = 0.02113 + 0.0625
+= 0.08363$ kg m<sup>2</sup> and $T = 1.1603$ s; the 10 degree amplitude lengthens that to 1.1625 s, and the demo measures
+1.1615 s at the default 10 substeps. With one substep the jitter on the pivot spoils the measurement; from two substeps on
+it is within 0.1 %.</p>
+</details>
+
+<div class="paper">
+<h4>angular momentum in APIC</h4>
+<p>Rotations come back in the MPM papers in a different guise. A particle in APIC (Jiang et al. 2015) carries, besides
+its velocity, a 3&times;3 matrix $\mathbf{C}_p$ describing how the velocity varies across its neighbourhood. For a blob of
+material spinning rigidly at $\boldsymbol\omega$, the velocity field is $\mathbf{v}(\mathbf{x}) = \boldsymbol\omega\times
+\mathbf{x}$, so $\mathbf{C}_p$ is the skew-symmetric matrix of $\boldsymbol\omega$: the antisymmetric part of
+$\mathbf{C}_p$ <i>is</i> the local angular velocity. Plain PIC throws $\mathbf{C}_p$ away, and with it the spin, which is
+why PIC visibly damps rotation; APIC keeps it, and the paper's headline property is that the particle-grid transfers
+conserve angular momentum exactly. The <a href="24-apic.html">APIC</a> chapter comes back to this; a spinning disk of
+particles is the classic test.</p>
+</div>
+
+<h2>Summary</h2>
+<ul>
+<li>A 2D rigid body has position, angle, velocity and angular velocity. Torque $\tau = \mathbf{r}\times\mathbf{F}$ drives
+$I\dot\omega = \tau$; moments of inertia come from $\int d^2\,dm$ and the parallel axis theorem.</li>
+<li>An impulse $\mathbf{J}$ at lever arm $\mathbf{r}$ changes $\mathbf{v}$ by $\mathbf{J}/m$ and $\omega$ by
+$(\mathbf{r}\times\mathbf{J})/I$. The point responds with the generalised inverse mass $w = 1/m + (\mathbf{r}\times
+\mathbf{n})^2/I$.</li>
+<li>XPBD joints on rigid bodies use $w$ in the denominator and apply the correction as a positional impulse that moves
+and turns each body. With substeps, a pinned bar's period comes out within 0.1 % of the exact value.</li>
+<li>In 3D, store orientation as a unit quaternion: rotate vectors with $q\mathbf{v}q^*$, compose by multiplication,
+normalise after updates. Euler angles suffer gimbal lock; rotation vectors are for rates and small changes.</li>
+<li>The exponential map turns a rotation vector into a quaternion and the logarithm back. Integrate with $q \leftarrow
+\operatorname{normalize}(q + \tfrac{h}{2}(0,\boldsymbol\omega)q)$.</li>
+<li>The inertia tensor is diagonal in the body frame and rotates with the body. Euler's equations add the gyroscopic term
+$\boldsymbol\omega\times\mathbf{I}\boldsymbol\omega$, which makes rotation about the intermediate axis unstable with
+growth rate $\Omega\sqrt{(I_3 - I_2)(I_2 - I_1)/(I_1I_3)}$.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>A 1 m thin rod hangs from one end. What is its small-swing period?</li>
+<li>Why does the end of a bar feel lighter than its centre when you push it sideways, and how much lighter for a thin
+rod?</li>
+<li>What is gimbal lock, and why do quaternions not suffer from it?</li>
+<li>Why are $q$ and $-q$ the same rotation, and where can that bite you?</li>
+<li>A box spins about its intermediate axis with no torque. Which quantities stay constant, and what happens to the
+angular velocity?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

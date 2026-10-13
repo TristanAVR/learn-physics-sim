@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading: APIC (2015) · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="29-reading-apic" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Reading: APIC (2015)</h1>
+<p class="subtitle">A guided tour of the paper that made particle-grid transfers stop losing spin.</p>
+
+<p>You have built PIC, FLIP and APIC yourself in chapters <a href="23-pic-flip.html">22</a> and
+<a href="24-apic.html">23</a>. Now it is time to read the paper where APIC first appeared. It is ten pages long, it is
+well written, and most of it will feel familiar. But research papers are compressed: a result that took the authors
+weeks is stated in one sentence, the proofs live in a supplementary document, and the notation is theirs, not ours.</p>
+
+<p>This chapter is a reading companion. Keep the paper open beside it and go section by section. For each section you
+will find what it says, what to read slowly and what you can skim, the key equations restated in this site's notation,
+and full derivations of the results the paper only states. Short "check your understanding" questions follow each
+major section, with answers you can unfold.</p>
+
+<p>By the end you should be able to read the paper unaided, explain why $\mathbf{D}_p = \tfrac14\Delta x^2\mathbf{I}$
+for quadratic B-splines without looking it up, and prove to a sceptical colleague that APIC conserves angular
+momentum.</p>
+
+<div class="paper">
+<h4>the paper</h4>
+<p>Chenfanfu Jiang, Craig Schroeder, Andrew Selle, Joseph Teran, Alexey Stomakhin. <i>The Affine Particle-In-Cell
+Method.</i> ACM Transactions on Graphics 34(4), Article 51, 2015 (SIGGRAPH 2015). DOI
+<a href="https://doi.org/10.1145/2766996">10.1145/2766996</a>. The authors were at the University of California, Los
+Angeles and Walt Disney Animation Studios. The paper refers to a supplementary technical document for its proofs;
+a later journal paper by Jiang, Schroeder and Teran (2017, listed under further reading) contains the full analysis.</p>
+</div>
+
+<h2>What the paper is, and where it sits</h2>
+
+<p>Every hybrid particle-grid method faces the same awkward moment twice per step. Particles carry the material
+around; the grid is where forces, pressure and collisions are computed. So each step you copy velocity from particles
+to grid (P2G), do the physics on the grid, and copy it back (G2P). Information is lost in those copies, and how much is
+lost decides how the simulation looks.</p>
+
+<p>The history in one table:</p>
+
+<table>
+<tr><th>Year</th><th>Method</th><th>What it changed</th></tr>
+<tr><td>1964</td><td>PIC (Harlow)</td><td>Particles carry mass and position; velocity is interpolated back from the grid each step. Stable, but heavily dissipative: everything looks like honey.</td></tr>
+<tr><td>1986</td><td>FLIP (Brackbill and Ruppel)</td><td>Particles keep their own velocity and receive only the grid's <i>change</i> in velocity. Lively, but noisy and sometimes unstable.</td></tr>
+<tr><td>1994-95</td><td>MPM (Sulsky, Chen and Schreyer; Sulsky, Zhou and Schreyer)</td><td>PIC extended to solids: particles also carry deformation and stress history.</td></tr>
+<tr><td>2005</td><td>Zhu and Bridson</td><td>FLIP brought to graphics liquids and sand, with a PIC/FLIP blend to tame the noise.</td></tr>
+<tr><td>2013</td><td>Stomakhin et al.</td><td>MPM for snow, developed for feature-film production; MPM becomes a graphics staple.</td></tr>
+<tr><td><b>2015</b></td><td><b>APIC (this paper)</b></td><td>Particles carry a small matrix describing the local velocity field. Stable like PIC, nearly as lively as FLIP, and angular momentum is conserved exactly.</td></tr>
+<tr><td>2016</td><td>MPM course notes</td><td>The standard tutorial, recommending APIC transfers (<a href="30-reading-mpm-course.html">chapter 30</a>).</td></tr>
+<tr><td>2018</td><td>MLS-MPM (Hu et al.)</td><td>Reuses the APIC matrix as the velocity gradient, fusing the force computation into P2G.</td></tr>
+<tr><td>2024</td><td>PB-MPM (Lewin)</td><td>A position-based solver on top of APIC-style transfers (<a href="31-reading-pbmpm.html">chapter 31</a>).</td></tr>
+</table>
+
+<p>The problem the paper solves, in plain words: before 2015, every simulation forced a choice between PIC (stable but
+syrupy, and spinning objects slow down as if stirred in treacle) and FLIP (energetic but noisy, with particles that
+jitter and clump). Practitioners blended the two and tuned the blend per shot. APIC removes the choice. Its idea is
+almost embarrassingly small: a particle sees several grid nodes with different velocities, and PIC throws all but
+their average away. Keep the slope too.</p>
+
+<h2>Before you start</h2>
+
+<p>Have these chapters behind you, in roughly this order of importance:</p>
+<ul>
+<li><a href="23-pic-flip.html">22, PIC and FLIP</a>: weights $w_{ip}$, quadratic B-splines, P2G and G2P. Essential;
+section 5.1 of the paper assumes all of it.</li>
+<li><a href="24-apic.html">23, APIC</a>: the affine matrix $\mathbf{C}_p = \mathbf{B}_p\mathbf{D}_p^{-1}$. Essential.</li>
+<li><a href="11-rotations.html">10, Rotations and Rigid Bodies</a>: angular momentum, the inertia tensor and the
+cross-product matrix. Needed for sections 5.2 and 5.3.</li>
+<li><a href="25-mpm.html">24, The Material Point Method</a>: only for context in sections 7 and 8, where the paper
+runs APIC inside MPM.</li>
+<li><a href="19-coupling.html">18, Coupling Two Solvers</a>: helpful for section 7 (meshes coupled through the
+grid).</li>
+</ul>
+
+<p><b>How to read it.</b> Do two passes. On the first, read sections 1, 3, 5 and 9 and look at the figures; skip 2, 6
+and 7. On the second, work through section 5 with a pencil, using the derivations below, then read 6 and 7. The whole
+paper hangs on equations (8) to (10); everything else is motivation, variants or evidence.</p>
+
+<h2>Notation: their symbols, our symbols</h2>
+
+<p>Section 4 and Table 1 of the paper define its notation. Most of it matches this site, because we chose our notation
+to match these papers. The differences that matter:</p>
+
+<table>
+<tr><th>Paper</th><th>This site</th><th>Meaning and warnings</th></tr>
+<tr><td>$p, q$ and $i, j$</td><td>same</td><td>Particles are $p, q$; grid nodes are $i, j$ (multi-indices in 2D/3D).</td></tr>
+<tr><td>superscript $n$, $n+1$</td><td>same</td><td>Start of this step, start of the next step. Mass $m_p$ has no superscript because it never changes.</td></tr>
+<tr><td>$\Delta t$</td><td>$h$</td><td>The time step. The paper hardly needs it; where it (and the MPM course) does, it is $\Delta t$. We write $h$.</td></tr>
+<tr><td>$\Delta x$</td><td>$\Delta x$</td><td>Grid spacing.</td></tr>
+<tr><td>$N(\mathbf{x})$, $w_{ip}^n = N(\mathbf{x}_p^n - \mathbf{x}_i)$</td><td>same</td><td>The interpolation kernel and its value for one particle-node pair.</td></tr>
+<tr><td>$\tilde{\mathbf{v}}_i^{n+1}$</td><td>"grid velocity after the update"</td><td>The tilde marks the grid velocity after forces, before it is sent back to particles.</td></tr>
+<tr><td>$\mathbf{B}_p$, $\mathbf{C}_p$, $\mathbf{D}_p$</td><td>same</td><td>Affine state, velocity-derivative matrix, inertia-like matrix: $\mathbf{C}_p = \mathbf{B}_p\mathbf{D}_p^{-1}$.</td></tr>
+<tr><td>$\mathbf{L}_p$, $\boldsymbol\omega_p$, $\mathbf{K}_p$</td><td>(chapter 11)</td><td>Particle angular momentum, angular velocity, inertia tensor. Only used by RPIC (section 5.2).</td></tr>
+<tr><td>$\mathbf{c}_{pa}$</td><td>row $a$ of $\mathbf{C}_p$</td><td>MAC-grid version of $\mathbf{C}_p$, one vector per axis $a$ (section 6).</td></tr>
+<tr><td>$\mathbf{v}^*$</td><td>$[\mathbf{v}]_\times$</td><td>The cross-product matrix: $\mathbf{v}^*\mathbf{u} = \mathbf{v}\times\mathbf{u}$.</td></tr>
+<tr><td>$\boldsymbol\epsilon$, $\mathbf{A}:\boldsymbol\epsilon$</td><td>-</td><td>The permutation (Levi-Civita) tensor; see the derivation of equation (11) below.</td></tr>
+<tr><td>$\Phi$</td><td>potential energy</td><td>Total potential energy of a Lagrangian (meshed) model, section 7.</td></tr>
+</table>
+
+<div class="warning">
+<p><b>Two traps.</b> First, the paper's $\mathbf{D}_p$ is not the deformation displacement of PB-MPM, which that paper
+also writes $\mathbf{D}$; on this site we call the PB-MPM matrix $\mathbf{D}^{\text{def}}_p$ (see
+<a href="31-reading-pbmpm.html">chapter 31</a>). Second, the paper writes the weight as $N(\mathbf{x}_p - \mathbf{x}_i)$,
+so $\nabla w_{ip}$ is a derivative with respect to the particle position $\mathbf{x}_p$. If your code differentiates
+with respect to $\mathbf{x}_i$ instead, every gradient flips sign.</p>
+</div>
+
+<h2>Abstract and section 1: Introduction</h2>
+
+<p>Read the introduction carefully; it is the clearest short account of the PIC/FLIP dilemma in the literature. It
+makes three points.</p>
+
+<ol>
+<li><b>PIC dissipates</b> because each grid-to-particle copy averages away detail. The most visible symptom is lost
+angular momentum: a spinning object slows down as if in a viscous fluid.</li>
+<li><b>FLIP is noisy</b> because of the <i>ringing instability</i>. There are usually more particles than grid nodes, so
+some patterns of particle velocity are invisible to the grid: they transfer to zero grid velocity and receive no
+response. PIC wipes such patterns out each step (it is a true filter); FLIP keeps them on the particles, where they
+persist and grow. You saw these "null modes" in <a href="23-pic-flip.html">chapter 23</a>.</li>
+<li><b>The blend</b> of the two (Zhu and Bridson 2005) reintroduces dissipation and needs per-scene tuning.</li>
+</ol>
+
+<p>The last paragraph of the introduction is the thesis: keep PIC's pure filtering, but stop throwing information away
+by giving each particle a locally affine description of the velocity, a $3\times3$ matrix in 3D. Note the claim
+precisely: the paper does not say APIC cures the ringing instability; it says APIC avoids the instability that FLIP
+adds on top of it. Section 9 comes back to this.</p>
+
+<p>The paragraph on angular momentum mentions that FLIP would conserve angular momentum with a "consistent" (full,
+non-diagonal) mass matrix, but that matrix can be singular, so in practice everyone uses the lumped (diagonal) one.
+You can skim this; it matters again in the MPM course, section 9.2 (<a href="30-reading-mpm-course.html">chapter
+30</a>).</p>
+
+<h3>Check your understanding</h3>
+<details><summary>1. Why is PIC called a "filter" and FLIP not?</summary>
+<p>In PIC, the new particle velocity is computed only from grid values, and the grid values are computed only from
+particle values. Everything passes through the grid, which has fewer degrees of freedom than the particles, so any
+particle pattern the grid cannot represent is removed. In FLIP the new particle velocity is the old particle velocity
+plus a grid increment, so the old particle state has a direct path to the new one that bypasses the grid. Patterns the
+grid cannot see survive along that path.</p>
+</details>
+<details><summary>2. If PIC filters, why does the paper say the ringing instability exists "to a lesser extent" in PIC too?</summary>
+<p>Because the particles move after each step. Even if the transfer removed every invisible pattern, the new particle
+positions define a new set of weights, and the same velocities can contain new invisible patterns relative to the new
+weights. The filter is applied once per step; motion recreates what it removed.</p>
+</details>
+
+<h2>Section 2: Previous work</h2>
+
+<p>Skim on a first pass. Two items are worth a note in the margin: Edwards and Bridson's discontinuous-Galerkin work,
+which the authors call similar in spirit because it also stores more data per cell, and an SPH method whose
+particles carry angular momentum samples, close in spirit to RPIC in section 5.2.</p>
+
+<h2>Section 3: Method outline</h2>
+
+<p>This section is short and important. Its point is that PIC, FLIP and APIC share one time-step loop: kinematics on
+particles, dynamics on the grid, and only the two transfers differ. Figure 7 shows the data flow of the three methods.
+In words: in PIC and APIC the arrows go particle to grid to particle, a closed loop through the grid; in FLIP there is
+an extra arrow from the old particle state straight to the new particle state, which the authors label the "unsafe
+path".</p>
+
+<p>The figure also contains a viewpoint you should adopt: a transfer can be read as the grid averaging particles, or,
+equivalently, as each particle collecting a weighted set of grid values. In the second view a particle is a fuzzy
+blob that overlaps several nodes, and a fuzzy blob can sensibly own a spin or a shear. That viewpoint is what makes
+RPIC and APIC feel natural.</p>
+
+<p>Read the paragraph that begins with the key observation: a particle receives data from several nodes but keeps only
+one constant value. That sentence is the whole paper.</p>
+
+<h2>Section 4: Notation</h2>
+
+<p>Read it together with the table above. Lowercase bold are vectors, uppercase bold matrices; the exception is angular
+momentum $\mathbf{L}$, a vector written uppercase by convention. Table 1 lists every symbol with where it lives
+(particle, node, MAC face, or global) and its type.</p>
+
+<h2>Section 5.1: PIC</h2>
+
+<p>The standard transfers, equations (1) and (2):</p>
+
+$$m_i^n = \sum_p w_{ip}^n m_p, \qquad m_i^n\mathbf{v}_i^n = \sum_p w_{ip}^n m_p \mathbf{v}_p^n, \tag{1}$$
+
+$$\mathbf{v}_p^{n+1} = \sum_i w_{ip}^n\,\tilde{\mathbf{v}}_i^{n+1}. \tag{2}$$
+
+<p>Term by term: node $i$ collects a weighted share $w_{ip}m_p$ of every nearby particle's mass, and the same share of
+its momentum; dividing gives the grid velocity, a mass-weighted average. After the grid update, each particle's new
+velocity is the weighted average of its nodes' velocities. Nothing else is kept.</p>
+
+<p>Then equation (3) defines total angular momentum on particles and on the grid:</p>
+
+$$\mathbf{L}^{P}_{\text{tot}} = \sum_p \mathbf{x}_p^n \times m_p\mathbf{v}_p^n, \qquad
+\mathbf{L}^{G}_{\text{tot}} = \sum_i \mathbf{x}_i \times m_i^n\mathbf{v}_i^n. \tag{3}$$
+
+<p>The paper states that P2G conserves angular momentum and G2P does not. Here is why, in three lines. We need two
+properties of B-spline weights, which you met in chapter 23: <b>partition of unity</b>, $\sum_i w_{ip} = 1$, and
+<b>linear reproduction</b>, $\sum_i w_{ip}\mathbf{x}_i = \mathbf{x}_p$.</p>
+
+<p><b>P2G.</b> Substitute (1) into $\mathbf{L}^G$ and swap the sums:</p>
+
+$$\sum_i \mathbf{x}_i \times \sum_p w_{ip} m_p\mathbf{v}_p = \sum_p \Big(\sum_i w_{ip}\mathbf{x}_i\Big)\times m_p\mathbf{v}_p
+= \sum_p \mathbf{x}_p\times m_p\mathbf{v}_p.$$
+
+<p><b>G2P.</b> Substitute (2) into $\mathbf{L}^P$:</p>
+
+$$\sum_p \mathbf{x}_p\times m_p\sum_i w_{ip}\tilde{\mathbf{v}}_i = \sum_i \Big(\sum_p w_{ip}m_p\mathbf{x}_p\Big)\times\tilde{\mathbf{v}}_i.$$
+
+<p>For conservation we would need $\sum_p w_{ip}m_p\mathbf{x}_p = m_i\mathbf{x}_i$: the mass-weighted centre of the
+particles near node $i$ would have to sit exactly on the node. It does not, in general, so angular momentum leaks.</p>
+
+<p>A one-particle example shows where it goes. Put a single particle of mass $m$ at $\mathbf{x}_p$ and suppose the grid
+update leaves its nodes spinning about it: $\tilde{\mathbf{v}}_i = \mathbf{v}_p + \boldsymbol\omega\times(\mathbf{x}_i -
+\mathbf{x}_p)$. In 2D, with $\omega$ a scalar, the grid holds an extra angular momentum about the particle of</p>
+
+$$\sum_i w_{ip}\,m\,(\mathbf{x}_i - \mathbf{x}_p)\times\big(\omega\times(\mathbf{x}_i - \mathbf{x}_p)\big)
+= m\,\omega\sum_i w_{ip}\,|\mathbf{x}_i - \mathbf{x}_p|^2.$$
+
+<p>PIC's G2P gives the particle $\sum_i w_{ip}\tilde{\mathbf{v}}_i = \mathbf{v}_p$, because the spin term averages to
+zero by linear reproduction. The spin is simply gone. For quadratic B-splines the sum
+$\sum_i w_{ip}|\mathbf{x}_i - \mathbf{x}_p|^2$ is exactly $\Delta x^2/2$ in 2D (we prove this below), so the lost
+angular momentum is $m\omega\Delta x^2/2$: the angular momentum of a fuzzy blob about one grid cell across, which a
+point particle cannot hold.</p>
+
+<h3>Check your understanding</h3>
+<details><summary>1. Does PIC conserve linear momentum in both transfers?</summary>
+<p>Yes. P2G: $\sum_i m_i\mathbf{v}_i = \sum_p m_p\mathbf{v}_p\sum_i w_{ip} = \sum_p m_p\mathbf{v}_p$ by partition of
+unity. G2P: $\sum_p m_p\mathbf{v}_p^{n+1} = \sum_i\big(\sum_p w_{ip}m_p\big)\tilde{\mathbf{v}}_i = \sum_i
+m_i\tilde{\mathbf{v}}_i$, using the definition of $m_i$. Only angular momentum is lost.</p>
+</details>
+<details><summary>2. A disk of particles rotates rigidly. After many PIC steps without forces, what happens?</summary>
+<p>Each G2P removes the part of the local spin that the particle cannot represent, so the rotation decays
+exponentially, as if the disk were immersed in a viscous fluid. You can watch it happen in the check at the end of this
+chapter.</p>
+</details>
+
+<h2>Section 5.2: Rigid Particle-In-Cell (RPIC)</h2>
+
+<p>RPIC is a stepping stone, not the destination: it fixes rotation but still damps shear. Read it for the idea, skim
+the details on a first pass. The idea: give each particle a sample of angular momentum $\mathbf{L}_p$, defined as
+exactly what PIC's G2P throws away, equation (4):</p>
+
+$$\mathbf{L}_p^{n+1} = \sum_i w_{ip}^n(\mathbf{x}_i - \mathbf{x}_p^n)\times m_p\tilde{\mathbf{v}}_i^{n+1}. \tag{4}$$
+
+<p>Total particle angular momentum becomes orbital plus spin, equation (5):
+$\mathbf{L}^P_{\text{tot}} = \sum_p(\mathbf{x}_p\times m_p\mathbf{v}_p + \mathbf{L}_p)$. The paper says G2P now
+conserves angular momentum "trivially". Verify it: with $\mathbf{v}_p^{n+1}$ from (2) and $\mathbf{L}_p^{n+1}$ from (4),</p>
+
+$$\sum_p\Big[\mathbf{x}_p\times m_p\sum_i w_{ip}\tilde{\mathbf{v}}_i + \sum_i w_{ip}(\mathbf{x}_i - \mathbf{x}_p)\times m_p\tilde{\mathbf{v}}_i\Big]
+= \sum_p\sum_i w_{ip}m_p\,\mathbf{x}_i\times\tilde{\mathbf{v}}_i = \sum_i m_i\,\mathbf{x}_i\times\tilde{\mathbf{v}}_i.$$
+
+<p>The $\mathbf{x}_p$ terms cancel, which is the whole trick. For the way back, treat each particle as a rigid body
+whose mass is spread over its nodes. Its angular velocity is $\boldsymbol\omega_p = \mathbf{K}_p^{-1}\mathbf{L}_p$, its
+velocity at node $i$ is $\mathbf{v}_p + \boldsymbol\omega_p\times(\mathbf{x}_i - \mathbf{x}_p)$, and the transfer is
+equation (6):</p>
+
+$$m_i\mathbf{v}_i = \sum_p w_{ip}m_p\big(\mathbf{v}_p + (\mathbf{K}_p^{-1}\mathbf{L}_p)\times(\mathbf{x}_i - \mathbf{x}_p)\big). \tag{6}$$
+
+<p>The inertia tensor of masses $w_{jp}m_p$ placed at the nodes is equation (7):</p>
+
+$$\mathbf{K}_p = \sum_j w_{jp}m_p\,(\mathbf{x}_j - \mathbf{x}_p)^*\,(\mathbf{x}_j - \mathbf{x}_p)^{*T}. \tag{7}$$
+
+<p>This is the textbook inertia tensor from <a href="11-rotations.html">chapter 11</a>, because
+$[\mathbf{r}]_\times[\mathbf{r}]_\times^T = |\mathbf{r}|^2\mathbf{I} - \mathbf{r}\mathbf{r}^T$. Plug (6) into
+$\mathbf{L}^G$ and the spin part gives $\sum_i w_{ip}m_p\,\mathbf{r}_i\times(\boldsymbol\omega_p\times\mathbf{r}_i) =
+\mathbf{K}_p\boldsymbol\omega_p = \mathbf{L}_p$ with $\mathbf{r}_i = \mathbf{x}_i - \mathbf{x}_p$, so P2G conserves
+angular momentum as well.</p>
+
+<h3>Check your understanding</h3>
+<details><summary>Why is RPIC not enough?</summary>
+<p>A rigid motion has six degrees of freedom in 3D (three translational, three rotational), but a general linear
+velocity field around a point has twelve: three for the velocity and nine for its gradient. The gradient's antisymmetric
+part is the rotation that RPIC keeps; its symmetric part (stretching and shearing) is still averaged away at every
+G2P. So RPIC preserves spinning but still damps, for example, a jelly cube's shear oscillation.</p>
+</details>
+
+<h2>Section 5.3: Affine Particle-In-Cell (APIC)</h2>
+
+<p>This is the section to read slowly, twice. Each particle stores a matrix $\mathbf{C}_p$ and represents the local
+velocity field $\mathbf{v}_p + \mathbf{C}_p(\mathbf{x} - \mathbf{x}_p)$, an affine function. The paper explains why it
+cannot simply copy RPIC: nine numbers cannot be recovered from three. So it changes the goal. Instead of conserving
+angular momentum directly, it asks that affine velocity fields survive both transfers unchanged, and finds that angular
+momentum conservation then comes for free.</p>
+
+<p>The transfers are equations (8) to (10):</p>
+
+$$m_i\mathbf{v}_i^n = \sum_p w_{ip}^n m_p\big(\mathbf{v}_p^n + \mathbf{B}_p^n(\mathbf{D}_p^n)^{-1}(\mathbf{x}_i - \mathbf{x}_p^n)\big), \tag{8}$$
+
+$$\mathbf{D}_p^n = \sum_i w_{ip}^n(\mathbf{x}_i - \mathbf{x}_p^n)(\mathbf{x}_i - \mathbf{x}_p^n)^T, \tag{9}$$
+
+$$\mathbf{B}_p^{n+1} = \sum_i w_{ip}^n\,\tilde{\mathbf{v}}_i^{n+1}(\mathbf{x}_i - \mathbf{x}_p^n)^T, \tag{10}$$
+
+<p>together with PIC's $\mathbf{v}_p^{n+1} = \sum_i w_{ip}\tilde{\mathbf{v}}_i^{n+1}$, which the paper leaves implicit.
+Term by term:</p>
+<ul>
+<li>In (8), each node receives the particle's affine velocity <i>evaluated at the node</i>, not the particle's own
+velocity. $\mathbf{B}_p\mathbf{D}_p^{-1} = \mathbf{C}_p$ is the velocity gradient the particle carries.</li>
+<li>(9) is the second moment of the weights about the particle, a covariance matrix of the stencil. It plays the role
+of an inertia tensor (compare (7)), and it is the matrix that makes the transfers consistent.</li>
+<li>(10) is a weighted outer product of the node velocities with the node offsets: a least-squares-like measure of how
+the velocity varies across the particle's stencil.</li>
+</ul>
+
+<p>The paper says (9) is "derived by preserving affine motion" and leaves it there. Let us derive it.</p>
+
+<h3>Affine fields survive both transfers</h3>
+
+<p>Suppose the grid velocity is exactly affine: $\tilde{\mathbf{v}}_i = \mathbf{a} + \mathbf{M}\mathbf{x}_i$ for some
+vector $\mathbf{a}$ and matrix $\mathbf{M}$. A good transfer should hand the particle exactly this field.</p>
+
+<p><b>G2P.</b> The particle velocity is</p>
+$$\mathbf{v}_p = \sum_i w_{ip}(\mathbf{a} + \mathbf{M}\mathbf{x}_i) = \mathbf{a} + \mathbf{M}\mathbf{x}_p,$$
+<p>by partition of unity and linear reproduction. For $\mathbf{B}_p$, write $\mathbf{x}_i = \mathbf{x}_p +
+(\mathbf{x}_i - \mathbf{x}_p)$:</p>
+$$\mathbf{B}_p = \sum_i w_{ip}\big(\mathbf{a} + \mathbf{M}\mathbf{x}_p + \mathbf{M}(\mathbf{x}_i - \mathbf{x}_p)\big)(\mathbf{x}_i - \mathbf{x}_p)^T
+= (\mathbf{a} + \mathbf{M}\mathbf{x}_p)\underbrace{\sum_i w_{ip}(\mathbf{x}_i - \mathbf{x}_p)^T}_{=\,\mathbf{0}} + \mathbf{M}\mathbf{D}_p.$$
+<p>So $\mathbf{B}_p = \mathbf{M}\mathbf{D}_p$, and the particle recovers the gradient exactly if it computes
+$\mathbf{C}_p = \mathbf{B}_p\mathbf{D}_p^{-1} = \mathbf{M}$. That is where (9) comes from: $\mathbf{D}_p$ is whatever
+matrix undoes the weighting in (10).</p>
+
+<p><b>P2G.</b> Now suppose every particle carries the same affine field, $\mathbf{v}_p = \mathbf{a} +
+\mathbf{M}\mathbf{x}_p$ and $\mathbf{C}_p = \mathbf{M}$. Then (8) gives</p>
+$$m_i\mathbf{v}_i = \sum_p w_{ip}m_p\big(\mathbf{a} + \mathbf{M}\mathbf{x}_p + \mathbf{M}(\mathbf{x}_i - \mathbf{x}_p)\big)
+= (\mathbf{a} + \mathbf{M}\mathbf{x}_i)\sum_p w_{ip}m_p = m_i(\mathbf{a} + \mathbf{M}\mathbf{x}_i).$$
+<p>The grid gets the affine field exactly, at every node with mass, whatever the particle distribution. Compare PIC,
+where the same calculation gives $m_i\mathbf{v}_i = \mathbf{a}\,m_i + \mathbf{M}\sum_p w_{ip}m_p\mathbf{x}_p$, which is
+affine only if particles sit symmetrically around every node.</p>
+
+<div class="note">
+<p><b>The point of the derivation:</b> translations, rotations, uniform stretches and shears are all affine, so all of
+them now pass through a P2G-G2P round trip untouched. PIC preserves only translations. This is why APIC removes almost
+all of PIC's dissipation while keeping its filter.</p>
+</div>
+
+<h3>Why $\mathbf{D}_p = \tfrac14\Delta x^2\mathbf{I}$ for quadratic B-splines</h3>
+
+<p>The paper says $\mathbf{D}_p$ takes a "surprisingly simple form" for quadratic and cubic B-splines. Here is the
+calculation the paper skips.</p>
+
+<p><b>Step 1: it is diagonal.</b> The weights are tensor products, $w_{ip} = N(\tfrac{x_p - x_i}{\Delta
+x})N(\tfrac{y_p - y_i}{\Delta x})$ in 2D. The off-diagonal entry of (9) factorises:</p>
+$$D_{xy} = \Big(\sum_{i_x} N_x\,(x_i - x_p)\Big)\Big(\sum_{i_y} N_y\,(y_i - y_p)\Big) = 0\cdot 0,$$
+<p>because each factor is a 1D first moment, which vanishes by linear reproduction. The diagonal entry is the 1D
+second moment times $\sum N_y = 1$, so everything reduces to one 1D sum.</p>
+
+<p><b>Step 2: the 1D second moment.</b> Measure positions in cells. The quadratic B-spline touches three nodes. Let
+$t\in[-\tfrac12,\tfrac12)$ be the particle's offset from the middle node. The three nodes are at signed distances
+$-1-t$, $-t$, $1-t$ from the particle, with weights</p>
+$$w_0 = \tfrac12(\tfrac12 - t)^2,\qquad w_1 = \tfrac34 - t^2,\qquad w_2 = \tfrac12(\tfrac12 + t)^2.$$
+<p>These are the weights in your chapter-22 code. The second moment is
+$w_0(1+t)^2 + w_1t^2 + w_2(1-t)^2$. Pair the outer terms: $(\tfrac12 - t)(1 + t) = \tfrac12 - \tfrac t2 - t^2$ and
+$(\tfrac12 + t)(1 - t) = \tfrac12 + \tfrac t2 - t^2$, so</p>
+$$\tfrac12\Big[(\tfrac12 - t^2 - \tfrac t2)^2 + (\tfrac12 - t^2 + \tfrac t2)^2\Big] = (\tfrac12 - t^2)^2 + \tfrac{t^2}{4}
+= \tfrac14 - \tfrac34t^2 + t^4.$$
+<p>Add the middle term $(\tfrac34 - t^2)t^2 = \tfrac34t^2 - t^4$ and everything that depends on $t$ cancels:</p>
+$$\sum_i w_{ip}\Big(\frac{x_i - x_p}{\Delta x}\Big)^2 = \frac14 \quad\text{for every } t.$$
+<p>Restoring units, $\mathbf{D}_p = \tfrac14\Delta x^2\mathbf{I}$, wherever the particle is. In code,
+$\mathbf{C}_p = \mathbf{B}_p\mathbf{D}_p^{-1}$ becomes <code>C = B * (4 / (dx * dx))</code>, and nobody ever forms
+or inverts $\mathbf{D}_p$. For $\Delta x = 0.01$ m, the factor is $4/10^{-4} = 40{,}000\ \text{m}^{-2}$.</p>
+
+<p><b>Cubic.</b> The cubic B-spline touches four nodes at distances $-1-s, -s, 1-s, 2-s$ with $s\in[0,1)$, and
+weights $\tfrac16(1-s)^3$, $\tfrac12s^3 - s^2 + \tfrac23$, $\tfrac12(1-s)^3 - (1-s)^2 + \tfrac23$, $\tfrac16s^3$. The
+same calculation (tedious by hand, two lines in a computer algebra system) gives a second moment of exactly
+$\tfrac13$, so $\mathbf{D}_p = \tfrac13\Delta x^2\mathbf{I}$.</p>
+
+<p><b>Why these numbers.</b> There is a pretty reason behind $\tfrac14$ and $\tfrac13$. A B-spline of degree $k$ is the
+unit box function convolved with itself $k$ times, that is, the probability density of a sum of $k+1$ independent
+uniform random numbers on $[-\tfrac12, \tfrac12]$. Each has variance $\tfrac1{12}$ and variances add, so the spline's
+continuous second moment is $\tfrac{k+1}{12}$: $\tfrac16$ for linear, $\tfrac14$ for quadratic, $\tfrac13$ for cubic.
+The discrete sum over nodes equals this continuous value exactly once the spline is smooth enough (degree 2 or more);
+that is a consequence of the Poisson summation formula, which you can take on trust.</p>
+
+<p><b>Linear (trilinear) weights fail.</b> With the hat function, a particle at fraction $s$ of a cell sees two nodes
+at distances $-s$ and $1-s$ with weights $1-s$ and $s$, giving a second moment of $s(1-s)$. It averages to
+$\tfrac16$, as the variance argument predicts, but it varies with position and is zero when the particle sits on a
+node ($s = 0$). Then $\mathbf{D}_p$ is singular, which is exactly the complication the paper mentions.</p>
+
+<h3>The trilinear identity</h3>
+
+<p>For linear weights the paper offers a way out: the identity
+$w_{ip}\mathbf{D}_p^{-1}(\mathbf{x}_i - \mathbf{x}_p) = \nabla w_{ip}$, which lets you evaluate (8) without forming
+$\mathbf{D}_p^{-1}$. Check it in 1D first. With $s = (x_p - x_0)/\Delta x$, $D_p = s(1-s)\Delta x^2$. For node 0,
+$w_0 = 1 - s$ and $x_0 - x_p = -s\Delta x$:</p>
+$$w_0\,D_p^{-1}(x_0 - x_p) = \frac{(1-s)(-s\Delta x)}{s(1-s)\Delta x^2} = -\frac{1}{\Delta x} = \frac{\partial w_0}{\partial x_p}.$$
+<p>For node 1, $w_1 = s$ and $x_1 - x_p = (1-s)\Delta x$, giving $+1/\Delta x$, again the derivative. The $s(1-s)$
+cancels, which is why the identity survives even where $D_p$ itself vanishes. In 2D or 3D, $\mathbf{D}_p$ is diagonal
+(step 1 above still applies) and each component of $w_{ip}\mathbf{D}_p^{-1}(\mathbf{x}_i - \mathbf{x}_p)$ is the 1D
+identity in that axis multiplied by the other axes' weights, which is exactly the corresponding component of the
+tensor-product gradient. Equation (8) then reads</p>
+$$m_i\mathbf{v}_i = \sum_p m_p\big(w_{ip}\mathbf{v}_p + \mathbf{B}_p\nabla w_{ip}\big)\qquad\text{(trilinear weights).}$$
+
+<div class="note">
+<p><b>Keep this identity in mind.</b> Replacing $\nabla w_{ip}$ by $w_{ip}\mathbf{D}_p^{-1}(\mathbf{x}_i -
+\mathbf{x}_p)$ for <i>quadratic</i> weights, where it is an approximation rather than an identity, is precisely the
+move that turns MPM into MLS-MPM (2018). <a href="30-reading-mpm-course.html">Chapter 30</a> works it through.</p>
+</div>
+
+<h3>Equation (11): what angular momentum means for an APIC particle</h3>
+
+<p>An APIC particle carries more than $\mathbf{x}_p\times m_p\mathbf{v}_p$: its affine field spins the nodes around it.
+The paper defines particle angular momentum as the grid angular momentum that the next P2G would produce, equation
+(11):</p>
+
+$$\mathbf{L}^P_{\text{tot}} = \sum_p m_p\big(\mathbf{x}_p\times\mathbf{v}_p + (\mathbf{B}_p)^T:\boldsymbol\epsilon\big). \tag{11}$$
+
+<p>Here $\boldsymbol\epsilon$ is the permutation tensor ($\epsilon_{\alpha\beta\gamma} = +1$ for even permutations of
+$(1,2,3)$, $-1$ for odd, 0 otherwise), and $(\mathbf{A}:\boldsymbol\epsilon)_\alpha =
+\sum_{\beta\gamma}\epsilon_{\alpha\beta\gamma}A_{\beta\gamma}$. That looks fearsome; in 2D it is one number. Let us
+derive (11) and see.</p>
+
+<p>Insert (8) into $\mathbf{L}^G = \sum_i\mathbf{x}_i\times m_i\mathbf{v}_i$ and write $\mathbf{r}_i = \mathbf{x}_i -
+\mathbf{x}_p$:</p>
+$$\mathbf{L}^G = \sum_p m_p\sum_i w_{ip}\,\mathbf{x}_i\times(\mathbf{v}_p + \mathbf{C}_p\mathbf{r}_i).$$
+<p>The $\mathbf{v}_p$ part gives $\mathbf{x}_p\times\mathbf{v}_p$ by linear reproduction. In the $\mathbf{C}_p$ part,
+write $\mathbf{x}_i = \mathbf{x}_p + \mathbf{r}_i$; the $\mathbf{x}_p$ piece vanishes because $\sum_i
+w_{ip}\mathbf{r}_i = \mathbf{0}$, leaving $\sum_i w_{ip}\,\mathbf{r}_i\times\mathbf{C}_p\mathbf{r}_i$. In components,</p>
+$$\Big(\sum_i w_{ip}\,\mathbf{r}_i\times\mathbf{C}_p\mathbf{r}_i\Big)_\alpha = \epsilon_{\alpha\beta\gamma}\,C_{\gamma\delta}\sum_i w_{ip}r_\beta r_\delta
+= \epsilon_{\alpha\beta\gamma}\,(\mathbf{C}_p\mathbf{D}_p)_{\gamma\beta} = \epsilon_{\alpha\beta\gamma}\,(\mathbf{B}_p)_{\gamma\beta},$$
+<p>summing over repeated indices and using the symmetry of $\mathbf{D}_p$. Since $(\mathbf{B}_p)_{\gamma\beta} =
+(\mathbf{B}_p^T)_{\beta\gamma}$, this is $(\mathbf{B}_p^T:\boldsymbol\epsilon)_\alpha$, which is (11).</p>
+
+<p><b>In 2D</b> only the $z$ component exists, and with the scalar cross product $\mathbf{a}\times\mathbf{b} =
+a_xb_y - a_yb_x$:</p>
+$$L^P_{\text{tot}} = \sum_p m_p\big(\mathbf{x}_p\times\mathbf{v}_p + (B_p)_{yx} - (B_p)_{xy}\big).$$
+<p>Only the antisymmetric part of $\mathbf{B}_p$ carries angular momentum, which is the paper's remark that the
+"skew-symmetric component" holds all of it. For a rigid spin, $\mathbf{C}_p = \omega\begin{pmatrix}0&-1\\1&0\end{pmatrix}$
+and $\mathbf{B}_p = \mathbf{C}_p\cdot\tfrac14\Delta x^2\mathbf{I}$, so the spin term is $m_p\,\omega\,\Delta x^2/2$:
+exactly the angular momentum that PIC lost in the one-particle example above. APIC keeps it.</p>
+
+<h3>The proof the paper leaves to its supplement: G2P conserves angular momentum</h3>
+
+<p>Conservation in P2G holds by construction, because (11) was defined as the result of P2G. The real claim is that G2P
+loses nothing either. In 2D, with (2) and (10), the spin term of the new particle state is</p>
+$$(B_p^{n+1})_{yx} - (B_p^{n+1})_{xy} = \sum_i w_{ip}\big(\tilde v_{iy}r_{ix} - \tilde v_{ix}r_{iy}\big) = \sum_i w_{ip}\,\mathbf{r}_i\times\tilde{\mathbf{v}}_i.$$
+<p>So the new total particle angular momentum is</p>
+$$L^P = \sum_p m_p\Big[\mathbf{x}_p\times\sum_i w_{ip}\tilde{\mathbf{v}}_i + \sum_i w_{ip}(\mathbf{x}_i - \mathbf{x}_p)\times\tilde{\mathbf{v}}_i\Big]
+= \sum_p\sum_i w_{ip}m_p\,\mathbf{x}_i\times\tilde{\mathbf{v}}_i = \sum_i m_i\,\mathbf{x}_i\times\tilde{\mathbf{v}}_i,$$
+<p>the grid angular momentum after the update. It is the same cancellation as in RPIC. The 3D proof is identical with
+$\epsilon_{\alpha\beta\gamma}$ in place of the 2D cross product.</p>
+
+<p>Two loose ends complete the argument.</p>
+<ul>
+<li><b>Advection.</b> Particles then move: $\mathbf{x}_p^{n+1} = \mathbf{x}_p^n + h\mathbf{v}_p^{n+1}$. This leaves
+$\mathbf{x}_p\times\mathbf{v}_p$ unchanged, because the added term is $h\,\mathbf{v}_p\times\mathbf{v}_p = \mathbf{0}$,
+and $\mathbf{B}_p$ is stored, not recomputed. (The grid can be treated the same way: moving the nodes with their own
+velocities does not change $\mathbf{L}^G$.)</li>
+<li><b>The next P2G</b> computes $\mathbf{D}_p$ at the new position. For quadratic and cubic weights it is the same
+constant matrix anyway; in general, conservation needs the $\mathbf{D}_p$ in $\mathbf{C}_p = \mathbf{B}_p\mathbf{D}_p^{-1}$
+to be exactly the moment (9) at the position where P2G is done.</li>
+</ul>
+
+<p>So the transfers and advection together conserve angular momentum exactly, to round-off. Whether the whole step
+conserves it depends on the grid update: MPM elastic forces built from a symmetric Cauchy stress do (the course proves
+the continuous version; see <a href="30-reading-mpm-course.html">chapter 30</a>).</p>
+
+<p>The last paragraph of section 5.3 makes one more point worth underlining: because conservation is exact, rotation
+comes out right even with uneven particle sampling; Figure 9 shows a disk with four times as many particles in a thin
+band, rotating cleanly. Nothing relies on symmetric sampling or lucky cancellation.</p>
+
+<h3>Check your understanding</h3>
+<details><summary>1. Which parts of the derivations used which property of the weights?</summary>
+<p>Partition of unity ($\sum_i w_{ip} = 1$) and linear reproduction ($\sum_i w_{ip}\mathbf{x}_i = \mathbf{x}_p$, equivalently
+$\sum_i w_{ip}\mathbf{r}_i = \mathbf{0}$) were used everywhere. Symmetry of $\mathbf{D}_p$ was used in equation (11).
+That $\mathbf{D}_p$ is a constant multiple of the identity was used nowhere in the proofs, only in making the code
+cheap.</p>
+</details>
+<details><summary>2. A colleague stores $\mathbf{C}_p$ instead of $\mathbf{B}_p$. Is that the same method?</summary>
+<p>Yes, for quadratic or cubic weights: $\mathbf{C}_p = \mathbf{B}_p\cdot 4/\Delta x^2$ (or $3/\Delta x^2$), a constant
+scaling, so storing either is equivalent. Most codes, including the MPM course's successors and the PB-MPM code, store
+$\mathbf{C}_p$ (or its time-scaled version).</p>
+</details>
+<details><summary>3. Compute the spin angular momentum of one APIC particle of mass 0.01 kg, spinning at 3 rad/s, on a grid with $\Delta x$ = 0.02 m, quadratic weights, 2D.</summary>
+<p>$m\,\omega\,\Delta x^2/2 = 0.01 \times 3 \times 0.0004/2 = 6\times10^{-6}$ kg m$^2$/s. Small for one particle, but
+summed over a disk of thousands of particles it is the fraction of angular momentum that PIC destroys every step.</p>
+</details>
+<details><summary>4. Why must particles be advected with $\mathbf{x}_p + h\mathbf{v}_p$ rather than with interpolated moved grid positions?</summary>
+<p>For PIC and APIC the two are identical: $\sum_i w_{ip}(\mathbf{x}_i + h\tilde{\mathbf{v}}_i) = \mathbf{x}_p +
+h\mathbf{v}_p^{n+1}$. The distinction only matters for FLIP, where the particle velocity is not the interpolated grid
+velocity. The MPM course makes the same remark in its step 8.</p>
+</details>
+
+<h2>Section 6: Fluids</h2>
+
+<p>Read this section if you build incompressible liquid solvers on a staggered (MAC) grid; otherwise skim. On a MAC
+grid each velocity component lives on its own set of face centres, so each component $a$ is a separate scalar field
+with its own trilinear weights $w_{aip}$. Instead of a matrix, the particle stores one vector $\mathbf{c}_{pa}$ per axis,
+which is just row $a$ of $\mathbf{C}_p$ (the gradient of velocity component $a$). Equations (12) to (14):</p>
+
+$$m_{ai} = \sum_p m_p w_{aip}, \qquad m_{ai}v_{ai} = \sum_p m_p w_{aip}\big(\mathbf{e}_a^T\mathbf{v}_p + \mathbf{c}_{pa}^T(\mathbf{x}_{ai} - \mathbf{x}_p)\big), \tag{12, 13}$$
+
+$$\mathbf{v}_p^{n+1} = \sum_{a,i} w_{aip}\,\tilde v_{ai}^{n+1}\mathbf{e}_a, \qquad \mathbf{c}_{pa}^{n+1} = \sum_i \nabla w_{aip}\,\tilde v_{ai}^{n+1}. \tag{14}$$
+
+<p>The extracted text of the paper loses the gradient symbol in (14); it must be there, because the trilinear identity
+turns $\mathbf{B}_p\mathbf{D}_p^{-1}$ into $\sum_i\tilde{\mathbf{v}}_i\nabla w_{ip}^T$, whose row $a$ is the formula above.
+Storage is the same as the collocated case (three vectors or one matrix), and the pressure projection is untouched.</p>
+
+<h3>Check your understanding</h3>
+<details><summary>Why can a MAC-grid APIC use trilinear weights when collocated APIC with trilinear weights has trouble?</summary>
+<p>Because the method stores $\mathbf{c}_{pa}$ (the $\mathbf{C}_p$ form) directly and computes it with weight gradients, it
+never needs $\mathbf{D}_p^{-1}$, so the singularity of $\mathbf{D}_p$ for particles on grid facets never arises.</p>
+</details>
+
+<h2>Section 7: Lagrangian forces</h2>
+
+<p>This section is independent of the transfers, as the paper says. It shows how to apply forces from a mesh (springs,
+finite elements, anything with a potential energy $\Phi(\mathbf{x}_p)$) through the MPM grid, so that a meshed cloth can
+collide with MPM material for free. The MPM course repeats it almost word for word as its section 12.2. Skim on a first
+pass.</p>
+
+<p>The derivation the paper compresses: imagine the grid nodes move during the step, $\hat{\mathbf{x}}_i = \mathbf{x}_i +
+h\mathbf{v}_i$, and the particles follow them by interpolation, $\mathbf{x}_p = \sum_i w_{ip}\hat{\mathbf{x}}_i$. Then
+the energy is a function of node positions through the particles, and the chain rule gives the force on a node,</p>
+
+$$\mathbf{f}_i = -\frac{\partial\Phi}{\partial\hat{\mathbf{x}}_i} = -\sum_p\frac{\partial\Phi}{\partial\mathbf{x}_p}\frac{\partial\mathbf{x}_p}{\partial\hat{\mathbf{x}}_i}
+= \sum_p w_{ip}\,\mathbf{f}_p,$$
+
+<p>and differentiating once more, the change in node force for a change $\mathbf{u}_j$ in node positions (needed by an
+implicit solver),</p>
+
+$$\delta\mathbf{f}_i = \sum_{p,q,j} w_{ip}\,\frac{\partial\mathbf{f}_p}{\partial\mathbf{x}_q}\,w_{jq}\,\mathbf{u}_j. \tag{15}$$
+
+<p>Read (15) right to left, which is also how to compute it: interpolate the node displacements to particles
+($\sum_j w_{jq}\mathbf{u}_j$), multiply by the mesh's force derivative, and splat the result back to nodes. Three cheap
+passes instead of a triple sum.</p>
+
+<h3>Check your understanding</h3>
+<details><summary>Why does the meshed particle's stored $\mathbf{F}_p$ go unused?</summary>
+<p>Because for a meshed object the deformation is measured by the mesh itself (from vertex positions), which is more
+accurate than an $\mathbf{F}_p$ evolved by the grid velocity gradient. The particle is still an MPM particle for the
+transfers, so it collides through the grid, but its forces come from the mesh.</p>
+</details>
+
+<h2>Section 8: Results</h2>
+
+<p>Read the figure captions and the energy paragraph; the rest is a tour of examples (liquid pours, sand, lava, a
+coupled cloth example) comparing APIC with PIC, FLIP and blends. What to look for:</p>
+<ul>
+<li><b>APIC versus blends.</b> The paper reports that pure APIC beats APIC/PIC blends (a blend means scaling
+$\mathbf{B}_p$ by a factor below 1), unlike FLIP, where blends are needed. A useful knob to know exists.</li>
+<li><b>Granular material.</b> PIC makes sand look wet and clumpy, because its dissipation acts like cohesion; FLIP
+makes it noisy; APIC looks like dry powder. This is a qualitative claim about appearance, and the figures are the
+evidence.</li>
+<li><b>The energy test.</b> A circle of radius 0.3 at the centre of the unit square, on a $32\times32$ grid, four
+particles per cell, density 2, an initial horizontal velocity proportional to $x - 0.5$ (so the circle stretches and
+springs back), the snow paper's elastic model with $E = 0.5$ and $\nu = 0.4$. These numbers are enough to reproduce
+the test; it is an exercise below.</li>
+<li><b>Figures 13 and 14.</b> Figure 13 is honest: FLIP retains <i>more</i> total energy than APIC in several tests.
+The caption explains why, and the explanation is worth remembering: FLIP stores kinetic energy in the transfer's null
+modes, where nothing can dissipate it, so FLIP particles can keep moving relative to each other even when the bodies
+they belong to have stopped. Figure 14 splits the energy lost per frame into transfer losses and grid losses for PIC and
+APIC; the caption quotes total transfer losses of 82 % for APIC against 95 % for PIC. Work out for yourself from the
+plot what the percentages are percentages of; the robust conclusion is that APIC's transfers are far less dissipative
+than PIC's, and that no energy increase was ever observed across an APIC transfer round trip.</li>
+<li><b>Table 2 and Figure 15.</b> Run times are reported relative to PIC; extra cost per step is small, and total cost
+is dominated by how fast things move (the CFL condition), so energetic, unstable FLIP runs are the slowest.</li>
+</ul>
+
+<h3>Check your understanding</h3>
+<details><summary>Why would an unstable method take longer to run, if each step costs the same?</summary>
+<p>Because the time step is limited by a CFL condition: particles should not move more than about a cell per step, so
+$h \le C\,\Delta x/v_{\max}$. Noise and instability create large spurious velocities, which force smaller steps.</p>
+</details>
+
+<h2>Section 9: Discussion and limitations</h2>
+
+<p>Short; read it all. Three admissions:</p>
+<ol>
+<li>APIC neither improves nor worsens the ringing instability itself. It is stable because it filters like PIC, not
+because the null modes are gone.</li>
+<li>It filters information in G2P, so FLIP keeps more energy in some tests. If FLIP could be stabilised another way,
+that would be an advantage for FLIP.</li>
+<li>One extra matrix per particle and a few extra operations per transfer, negligible in practice.</li>
+</ol>
+<p>The final paragraph argues that the liveliness artists like in PIC/FLIP blends is really instability, and that
+artists would rather add detail deliberately than inherit it uncontrollably from the method.</p>
+
+<h2>What the paper does not tell you</h2>
+
+<ul>
+<li><b>The full MPM loop with APIC.</b> The paper shows only transfers. The MPM course (2016) gives the complete
+eight-step algorithm with APIC; see <a href="30-reading-mpm-course.html">chapter 30</a>.</li>
+<li><b>The proofs.</b> They are in the supplementary document and, more completely, in Jiang, Schroeder and Teran's
+2017 journal paper. The derivations above are self-contained versions of the two central ones.</li>
+<li><b>Using $\mathbf{C}_p$ for the deformation gradient.</b> In MPM, the F update needs the velocity gradient at the
+particle, $\sum_i\tilde{\mathbf{v}}_i\nabla w_{ip}^T$. APIC already computes something very close, $\mathbf{C}_p$.
+MLS-MPM (2018) uses $\mathbf{C}_p$ for both, which saves work and makes the scheme consistent.</li>
+<li><b>Higher-order versions.</b> PolyPIC (2017) stores more polynomial modes per particle and recovers even more of
+the grid's information.</li>
+</ul>
+
+<h2>A runnable check</h2>
+
+<p>The demo below runs two identical disks with no forces at all, only transfers and advection: PIC on the left,
+APIC on the right, quadratic B-splines on a 48 by 24 grid. The red stripe shows how far each disk has turned. The plot
+tracks grid angular momentum after P2G, relative to the start; the readouts show the moment matrix $\mathbf{D}_p$
+at the mouse position for linear, quadratic and cubic weights, in units of $\Delta x^2$. Move the mouse around a cell
+and watch the linear entries change while the quadratic and cubic ones stay at 0.25 and 0.333.</p>
+
+<div class="demo" data-src="29-reading-apic/checks.js" data-height="460"
+     data-caption="Left: PIC. Right: APIC. Plot: angular momentum relative to the start."></div>
+
+<h2>Exercises</h2>
+
+<div class="exercise">
+<h4>implement equations (8) to (10) and verify angular momentum</h4>
+<p>Take your chapter-23 code (or the check above). Set up the rotating-disk test of the paper's Figure 4: a disk with
+velocity $\mathbf{v} = \omega\times(\mathbf{x} - \mathbf{c})$, no gravity, no forces. Print the relative change of
+$L^P$ from equation (11) per step. Predict it before you run: what should it be for APIC, and roughly what for PIC?</p>
+</div>
+<details class="hint"><summary>Hint</summary>
+<p>Measure angular momentum as $\sum_p m_p(\mathbf{x}_p\times\mathbf{v}_p + B_{yx} - B_{xy})$, or equivalently on the grid
+right after P2G. Forgetting the $\mathbf{B}_p$ term makes APIC look like it loses angular momentum; it has only moved
+from orbital to spin form.</p>
+</details>
+<details class="hint"><summary>Solution</summary>
+<p>APIC: relative change around $10^{-15}$ per step in double precision, round-off only. PIC: a steady decay. You
+can predict its rate. A rigidly spinning disk of mass $M$ and radius $R$ has $L = \tfrac12MR^2\omega$, and each PIC
+G2P throws away the spin part, about $\tfrac12M\Delta x^2\omega$ (the one-particle result summed over particles). The
+relative loss per transfer is therefore about $\Delta x^2/R^2$. In the check, $\Delta x = 1/24$ m and $R = 0.3$ m
+give 1.9 % per transfer; the measured value is 1.8 %, so with ten substeps per frame the PIC disk has lost almost all
+its spin within one second. The key lines are in <a href="../code/29-reading-apic/checks.js"
+target="_blank">checks.js</a>: <code>p2g</code> and <code>g2p</code>.</p>
+</details>
+
+<div class="exercise">
+<h4>compute $\mathbf{D}_p$ numerically</h4>
+<p>Write a function that evaluates (9) by brute force for a particle at a random position, for linear, quadratic and
+cubic weights. Confirm $\tfrac14\Delta x^2\mathbf{I}$ and $\tfrac13\Delta x^2\mathbf{I}$ to round-off, and plot the
+linear case's $D_{xx}/\Delta x^2$ against the particle's fractional position. Its maximum is at the cell centre: what
+value do you expect?</p>
+</div>
+<details class="hint"><summary>Answer</summary>
+<p>$s(1-s)$ peaks at $s = \tfrac12$ with value $\tfrac14$, and averages $\tfrac16$ over the cell.</p>
+</details>
+
+<div class="exercise">
+<h4>RPIC damps shear</h4>
+<p>Implement RPIC, equations (4) to (7), in 2D, where $\mathbf{L}_p$ and $\mathbf{K}_p$ are scalars ($K_p = m_p\sum_i
+w_{ip}|\mathbf{x}_i - \mathbf{x}_p|^2 = m_p\Delta x^2/2$ for quadratic weights). Run the rotating disk: RPIC should
+conserve angular momentum like APIC. Then give the disk a pure shear velocity $\mathbf{v} = (\gamma(y - c_y), 0)$ and
+compare the kinetic energy after 100 transfer round trips for PIC, RPIC and APIC.</p>
+</div>
+<details class="hint"><summary>What you should see</summary>
+<p>The shear field $(\gamma y, 0)$ is affine but not rigid: half of it is rotation and half is pure strain. APIC keeps all
+of it; RPIC keeps the rotational half and damps the strain half; PIC damps both.</p>
+</details>
+
+<div class="exercise">
+<h4>reproduce the oscillating circle (qualitatively)</h4>
+<p>In your chapter-24 MPM code, set up the energy test of section 8 and plot total energy against time for PIC, FLIP,
+a 0.95 FLIP/PIC blend and APIC. Do you reproduce the ordering of the paper's Figure 13(b)? Then add a slider that
+scales $\mathbf{B}_p$ by a factor between 0 and 1 (the APIC/PIC blend of Figure 1) and watch the energy curves move
+between the two extremes.</p>
+</div>
+
+<h2>Further reading</h2>
+<ul>
+<li>Jiang, Schroeder, Teran, <i>An angular momentum conserving affine-particle-in-cell method</i>, J. Comput. Phys.
+2017: the full proofs and analysis behind section 5.</li>
+<li>Stomakhin, Schroeder, Chai, Teran, Selle, <i>A material point method for snow simulation</i>, SIGGRAPH 2013: the
+constitutive model and MPM loop the paper's MPM examples use.</li>
+<li>Jiang, Schroeder, Teran, Stomakhin, Selle, <i>The material point method for simulating continuum materials</i>,
+SIGGRAPH 2016 course: the MPM tutorial that adopts APIC (<a href="30-reading-mpm-course.html">chapter 30</a>).</li>
+<li>Klár et al., <i>Drucker-Prager elastoplasticity for sand animation</i>, SIGGRAPH 2016: APIC-based MPM for sand
+(<a href="26-plasticity.html">chapter 26</a>).</li>
+<li>Gast, Schroeder, Stomakhin, Jiang, Teran, <i>Optimization integrator for large time steps</i>, IEEE TVCG 2015:
+implicit MPM as energy minimisation (<a href="27-implicit-mpm.html">chapter 27</a>).</li>
+<li>Fu, Guo, Gast, Jiang, Teran, <i>A polynomial particle-in-cell method</i> (PolyPIC), SIGGRAPH Asia 2017: more
+polynomial modes per particle than APIC's affine ones.</li>
+<li>Hu et al., <i>A moving least squares material point method</i> (MLS-MPM), SIGGRAPH 2018: APIC's $\mathbf{C}_p$
+reused as the velocity gradient, the basis of most compact MPM codes since.</li>
+<li>Smith, de Goes, Kim, <i>Analytic eigensystems for isotropic distortion energies</i>, ACM TOG 2019: making implicit
+solvers robust, cited by PB-MPM as the pitfall it avoids.</li>
+<li>Macklin, Müller, Chentanez, <i>XPBD</i>, Motion in Games 2016: the constraint framework PB-MPM borrows
+(<a href="08-xpbd.html">chapter 8</a>).</li>
+</ul>
+
+<h2>Summary</h2>
+<ul>
+<li>The paper's contribution is equations (8) to (10): particles carry an affine velocity $\mathbf{v}_p +
+\mathbf{C}_p(\mathbf{x} - \mathbf{x}_p)$, with $\mathbf{C}_p = \mathbf{B}_p\mathbf{D}_p^{-1}$.</li>
+<li>$\mathbf{D}_p$ is the second-moment matrix of the weights; it is exactly the matrix that makes affine velocity
+fields survive both transfers. For quadratic B-splines it is $\tfrac14\Delta x^2\mathbf{I}$ everywhere, for cubic
+$\tfrac13\Delta x^2\mathbf{I}$; for linear weights it varies and can be singular, which the trilinear identity sidesteps.</li>
+<li>Particle angular momentum includes a spin term from the antisymmetric part of $\mathbf{B}_p$ (equation (11)).
+With it, P2G, G2P and advection conserve angular momentum exactly.</li>
+<li>APIC keeps PIC's filtering (so it is stable) while preserving all affine motion (so it is barely dissipative). It
+does not remove the ringing instability; it just does not amplify it.</li>
+<li>Sections 6 and 7 are a MAC-grid variant and a mesh-coupling technique; section 8 is evidence; section 9 is an
+honest list of limits.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>State, in one sentence each, why PIC dissipates and why FLIP is noisy.</li>
+<li>Derive $\mathbf{B}_p = \mathbf{M}\mathbf{D}_p$ for an affine grid field $\mathbf{a} + \mathbf{M}\mathbf{x}_i$. Which
+two properties of the weights do you need?</li>
+<li>A particle sits a quarter of the way across a cell. Compute $D_{xx}/\Delta x^2$ for linear and for quadratic
+weights. (Linear: $\tfrac14\cdot\tfrac34 = 0.1875$; quadratic: 0.25.)</li>
+<li>Where is the angular momentum of an APIC particle stored, and why does advecting the particle not change it?</li>
+<li>What is the trilinear identity, and which later method turned its quadratic-weight approximation into a
+technique?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

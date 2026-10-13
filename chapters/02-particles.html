@@ -95,7 +95,7 @@ $$\mathbf{x}_{n+1} = \mathbf{x}_n + h\,\mathbf{v}_n, \qquad \mathbf{v}_{n+1} = \
 
 <p>Call it once per step, forever, and you have a simulator. This scheme is called explicit Euler integration, and it
 is not the only choice: the order of those two lines, and which velocity you use to move, matters a great deal once
-springs appear. The next chapter, <a href="03-time-integration.html">Time Integration</a>, is entirely about that.
+springs appear. The next chapter, <a href="04-time-integration.html">Time Integration</a>, is entirely about that.
 For a ball in gravity it does well, and we can measure exactly how well, because for this problem we know the true
 answer.</p>
 
@@ -171,7 +171,7 @@ will see it again, much more dramatically, in the next chapter.</p>
 geometrically by a factor $e$, so infinitely many bounces fit in finite time (about 5.75 s for a 2 m drop at
 $e = 0.8$). A simulation with a fixed step cannot resolve them all, and the ball ends up jittering on the floor. Real
 engines add a rule such as "below a small impact speed, set the velocity to zero". Contact gets a proper treatment in
-<a href="15-contact-friction.html">Contact and Friction</a>.</p>
+<a href="16-contact-friction.html">Contact and Friction</a>.</p>
 </div>
 
 <h2>Many particles</h2>
@@ -186,7 +186,7 @@ same loop:</p>
 
 <p>The "fountain" scene emits about a hundred particles a second from the origin, with slightly random speeds and
 directions, and keeps the newest 400. Each follows its own parabola and bounces on its own. It already looks like
-spray from a hose. Once particles start pushing on each other (springs in chapter 04, constraints in chapter 05,
+spray from a hose. Once particles start pushing on each other (springs in chapter 05, constraints in chapter 06,
 pressure in a fluid much later), the loop gets one more stage, "compute forces between particles", but its shape
 stays the same.</p>
 
@@ -282,7 +282,7 @@ single slow frame becomes a giant step, and the error (or worse, an instability)
 was doing. The standard pattern is to run as many fixed steps as fit into the elapsed time. The sandbox lets you set
 $h$ and the number of steps per drawn frame, and the demo picks enough steps of the chosen size to keep pace with real
 time. Why fixed steps matter so much, and how to choose $h$, is the subject of
-<a href="03-time-integration.html">Time Integration</a>.</p>
+<a href="04-time-integration.html">Time Integration</a>.</p>
 
 <h2>Your turn</h2>
 

@@ -9,12 +9,12 @@
 <body>
 <script src="lib/sandbox.js"></script>
 <script>
-  // Runs one simulation script: run.html?src=03-time-integration/solution.js
+  // Runs one simulation script: run.html?src=04-time-integration/solution.js
   // The path is relative to this folder; only local files under code/ are allowed.
   (function () {
     const src = new URLSearchParams(location.search).get('src') || '';
     if (!/^[\w\-\/]+\.js$/.test(src) || src.includes('..')) {
-      document.body.textContent = 'Pass ?src=<chapter>/<file>.js, e.g. ?src=03-time-integration/solution.js';
+      document.body.textContent = 'Pass ?src=<chapter>/<file>.js, e.g. ?src=04-time-integration/solution.js';
       return;
     }
     const s = document.createElement('script');

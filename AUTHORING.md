@@ -1,7 +1,7 @@
 # Authoring guide
 
 How every chapter of Learn Physics Simulation is written. Read it fully before writing or editing a chapter, then read
-the model chapter, `chapters/03-time-integration.html` with `code/03-time-integration/`, and match it.
+the model chapter, `chapters/04-time-integration.html` with `code/04-time-integration/`, and match it.
 
 ## 1. What the site is
 
@@ -65,7 +65,7 @@ maths delimiter.
 ## 4b. Presenting maths
 
 Every formula must be followable by a reader who meets it for the first time. These rules come from the learning
-research on worked examples, cognitive load and multiple representations; `chapters/03-time-integration.html` is the
+research on worked examples, cognitive load and multiple representations; `chapters/04-time-integration.html` is the
 reference implementation.
 
 1. **Notation before formulas (pre-training).** Introduce the symbols on their own, before the first equation that

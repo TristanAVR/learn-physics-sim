@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Muscles and Travelling Waves · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="20-active-materials" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Muscles and Travelling Waves</h1>
+<p class="subtitle">Materials that push back on their own, and the one-line change that turns a constraint into a muscle.</p>
+
+<p>Everything simulated so far has been passive. A spring stretched by a load pulls back; a balloon inflated by a
+pump pushes out; leave them alone and they settle. Some materials do not wait to be loaded. A muscle contracts because
+it is told to. An earthworm crawls by passing a wave of contraction along its body. A peristaltic pump, the kind that
+moves slurry or paint without letting it touch a valve, rolls a squeeze along a hose. Squeezing a toothpaste tube from
+the closed end is the same idea done by hand, and artificial muscles (pneumatic braided muscles, shape-memory wires,
+electroactive polymers) bring it to robots.</p>
+
+<p>What these have in common is a source of force inside the material, switched by a control signal. In a simulator
+that turns out to be a small change: the constraint you already know, with its rest length or its force driven by an
+<b>activation</b> $a(t)$ between 0 (relaxed) and 1 (fully on). The interesting part is what follows from it: how a
+wave of activation moves things, how a body crawls with nothing but internal forces and friction, and how a stiff
+actuator can inject energy into a light node if you let it snap.</p>
+
+<p>By the end of this chapter you will have written a muscle constraint, driven it with a travelling wave, predicted
+the transport speed of a peristaltic tube and the crawling speed of a worm from one-line formulas, and seen why real
+actuators need an activation time constant.</p>
+
+<h2>Two ways to make a material active</h2>
+
+<p>Take a single muscle fibre between particles $a$ and $b$, with rest length $L_0$ and current length $\ell =
+|x_b - x_a|$. There are two classic ways to make it contract.</p>
+
+<p><b>Active strain.</b> Change the shape the material wants to have. The activation shortens the rest length,</p>
+
+$$L(a) = L_0\,(1 - \varepsilon_\text{max}\, a), \qquad C = \ell - L(a),$$
+
+<p>where $\varepsilon_\text{max}$ is the largest strain the muscle can produce (0.3 means it can shorten by 30%). The
+constraint machinery then pulls the fibre to its new rest length, exactly as it would pull a stretched spring back to
+an unchanged one.</p>
+
+<p><b>Active stress.</b> Leave the rest length alone and add a contractile force along the fibre:</p>
+
+$$F = a\, F_\text{max}\, f_L(\ell),$$
+
+<p>where $F_\text{max}$ is the strongest pull and $f_L$ is a force-length factor between 0 and 1. Real muscle fibres
+pull hardest near their rest length and lose force as they shorten, because the molecular motors run out of overlap.
+We use the simplest version: $f_L$ falls linearly from 1 at $\ell = L_0$ to 0 at the shortest length $L_0(1 -
+\varepsilon_\text{max})$.</p>
+
+<p>For a linear spring of stiffness $k$ the two are the same thing seen from two sides: shifting the rest length by
+$\delta$ adds a force $k\delta$. They differ in what you control. With a stiff constraint, active strain is a
+<b>position servo</b>: it reaches its target length whatever the load, as long as it can. Active stress is a <b>force
+source</b>: it pulls with a given force, and how far it moves depends on what it pulls against. Biological muscle is
+closer to the second (biomechanics models it with Hill-type force-length and force-velocity curves); simulation
+codes often prefer the first, because it fits the constraint solver and stays stable at any stiffness.</p>
+
+<h2>The muscle constraint</h2>
+
+<p>Active strain is one XPBD distance constraint with two changes. First, a muscle can pull but not push. When the
+fibre is shorter than its rest length it goes slack, so the constraint is an inequality, active only while $C &gt; 0$,
+and its multiplier must keep the sign of tension. Second, a muscle has a strongest pull, $F_\text{max}$. In XPBD the
+force over a step is $F = |\lambda| / h^2$ (from the <a href="08-xpbd.html">XPBD chapter</a>), so capping the force is
+clamping the accumulated multiplier.</p>
+
+<pre><code class="language-js">function solveMuscle(m) {
+  const dx = P.x[m.b] - P.x[m.a], dy = P.y[m.b] - P.y[m.a], len = Math.hypot(dx, dy);
+  const nx = dx / len, ny = dy / len;
+  const rest = m.L0 * (1 - m.strainMax * m.act);            // active strain
+  const C = len - rest;
+  if (m.tensionOnly &amp;&amp; C &lt;= 0) return;                   // slack: a muscle cannot push
+  const wa = P.w[m.a], wb = P.w[m.b], at = m.alpha / (h * h);
+  const dl = (-C - at * m.lam) / (wa + wb + at);
+  const lamMax = m.cap * h * h;                              // force cap: |lambda| / h^2 &lt;= cap
+  const lam = Math.max(-lamMax, Math.min(m.tensionOnly ? 0 : lamMax, m.lam + dl));
+  const d = lam - m.lam;
+  m.lam = lam;
+  P.x[m.a] -= wa * nx * d; P.y[m.a] -= wa * ny * d;
+  P.x[m.b] += wb * nx * d; P.y[m.b] += wb * ny * d;
+}</code></pre>
+
+<p>With the gradient $\nabla_b C = n$ (the unit vector from $a$ to $b$), a stretched fibre ($C &gt; 0$) gives a
+negative multiplier, which moves the two ends towards each other. So tension means $\lambda &lt; 0$, and a tension-only
+muscle clamps $\lambda$ to $[-F_\text{max}h^2, 0]$. The compliance $\alpha$ is the passive stretchiness of the fibre and
+its tendon. The demo runs 20 substeps of $h = 1/1200$ s per frame with one pass each, as in the
+<a href="09-substepping.html">small steps chapter</a>, so the multiplier restarts at zero every substep.</p>
+
+<p>The demo below has three scenes. Start with <i>muscle under load</i>: one muscle ($L_0 = 30$ cm,
+$\varepsilon_\text{max} = 0.3$) hangs from a beam with a weight, switched on for two seconds and off for two.</p>
+
+<div class="demo" data-src="20-active-materials/solution.js" data-height="520"
+     data-caption="Three scenes, one muscle constraint: a peristaltic tube, a crawling worm, and a muscle lifting a weight."></div>
+
+<h2>Under load: servo or force source</h2>
+
+<p>With active strain, the muscle shortens by $\varepsilon_\text{max} L_0 = 9$ cm minus the small passive stretch
+$m g \alpha$ of its compliance ($\alpha = 10^{-4}$ m/N): 8.95 cm with a 0.5 kg weight, 8.90 cm with 1 kg, 8.85 cm with
+1.5 kg. The load barely matters. That is the servo behaviour: the constraint produces whatever force it takes.</p>
+
+<p>Until it can't. With the default cap of 20 N, a 2 kg weight (19.6 N) is lifted only slowly, because there is almost
+no spare force to accelerate it, and a 3 kg weight (29.4 N) cannot be held at all: the multiplier sits at its clamp, the
+muscle lengthens under the load, and the weight sinks to the floor. A capped active-strain muscle is a position servo
+with a force limit, which is a good model of most real actuators.</p>
+
+<p>Switch the law to <i>active stress</i>. At full activation the weight hangs where the active force balances it,
+$F_\text{max} f_L(\ell) = m g$, so the shortening is</p>
+
+$$\Delta \ell = \varepsilon_\text{max} L_0 \left(1 - \frac{m g}{a F_\text{max}}\right).$$
+
+<p>With $F_\text{max} = 20$ N that predicts 8.56 cm for 0.1 kg, 6.79 cm for 0.5 kg, 4.59 cm for 1 kg and 2.38 cm for
+1.5 kg, and the demo measures the same to the hundredth of a centimetre. Now the load matters a lot: heavier weights
+are lifted less, and at $m g = F_\text{max}$ not at all. That is how your arm feels.</p>
+
+<table>
+<tr><th>load</th><th>active strain</th><th>active stress</th></tr>
+<tr><td>0.5 kg</td><td>8.95 cm</td><td>6.79 cm</td></tr>
+<tr><td>1.0 kg</td><td>8.90 cm</td><td>4.59 cm</td></tr>
+<tr><td>1.5 kg</td><td>8.85 cm</td><td>2.38 cm</td></tr>
+<tr><td>3.0 kg</td><td>cannot hold it (above the 20 N cap)</td><td>cannot lift it</td></tr>
+</table>
+
+<h2>Snapping: actuators that inject energy</h2>
+
+<p>Set the load to its lightest (10 g), the force cap to 1000 N and the activation time constant to 0. When the
+command switches on, the rest length jumps by 9 cm in a single substep. A stiff constraint tries to close that gap at
+once, and closing 9 cm in $h = 1/1200$ s means a velocity of $0.09 \times 1200 = 108$ m/s. The force cap limits it (the
+most the constraint can move a 10 g particle in one substep is $w F_\text{max} h^2 = 6.9$ cm), but the readout still
+shows a peak of about 44 m/s. That kinetic energy came from nowhere physical: it is the energy of a spring whose rest
+length was teleported.</p>
+
+<p>Nothing in the constraint is wrong. The command is. A real muscle cannot switch on instantly; its activation rises
+over tens of milliseconds as calcium floods the fibres. Model that with first-order <b>activation dynamics</b>:</p>
+
+$$\frac{da}{dt} = \frac{u - a}{\tau}, \qquad a \leftarrow a + (u - a)\big(1 - e^{-h/\tau}\big)\ \text{each substep},$$
+
+<p>where $u$ is the command and $\tau$ the time constant. With $\tau = 50$ ms the same light weight peaks at about
+1.9 m/s. This is an honest speed limit: it limits how fast the <i>actuator</i> can change, which is a property of the
+actuator, rather than clamping the velocity of whatever it happens to move.</p>
+
+<div class="warning">
+<p><b>Active stress on a light node is an explicit stiff force.</b> The force-length factor makes the active force
+behave like a spring of stiffness $F_\text{max}/(\varepsilon_\text{max}L_0)$, here $1000/0.09 \approx 11{,}000$ N/m. On
+a 10 g node that is $\omega \approx 1050$ rad/s and $h\omega \approx 0.88$ per substep: still under the symplectic
+Euler limit of 2 from the <a href="04-time-integration.html">time integration chapter</a>, but only just, and the weight
+still flies at 24 m/s with $\tau = 50$ ms. Give actuated parts some mass, some damping and a ramped command, and check
+$h\omega$ for explicit actuator forces as you would for any stiff spring.</p>
+</div>
+
+<h2>Travelling waves</h2>
+
+<p>One muscle lifts a weight. A row of muscles, switched on one after another, moves things along. The control signal
+becomes a function of position $s$ along the body and of time:</p>
+
+$$a(s, t) = f(s - c\,t).$$
+
+<p>Any function of $s - ct$ is a shape that slides along $s$ at speed $c$ without changing: the value at position $s$ at
+time $t$ is the value that was at $s - c\,\Delta t$ a time $\Delta t$ earlier. If $f$ repeats every wavelength
+$\lambda$, each point contracts once per period $\lambda / c$. The demo's $f$ is one smooth bump per wavelength,</p>
+
+$$f(\phi) = \left(\tfrac12\big(1 - \cos 2\pi\phi\big)\right)^3, \qquad \phi = \frac{s - ct}{\lambda} \bmod 1,$$
+
+<p>cubed to make the contraction narrower than the gap between contractions. Its average over a wavelength is
+$5/16$, a number that will matter for the worm.</p>
+
+<pre><code class="language-js">function waveActivation(s, t) {
+  let phase = ((s - waveSpeed * t) / wavelength) % 1;
+  if (phase &lt; 0) phase += 1;                  // % keeps the sign of its left operand
+  const bump = 0.5 * (1 - Math.cos(2 * Math.PI * phase));
+  return bump * bump * bump;
+}</code></pre>
+
+<h3>Peristalsis</h3>
+
+<p>Switch the demo to the <i>peristaltic tube</i>: two walls of 41 particles each, every wall node held near its place
+by a soft 50 N/m tether (the elasticity of the tube), and a tension-only ring muscle across the tube at each node pair,
+with a rest length equal to the diameter (20 cm), $\varepsilon_\text{max} = 0.8$, and a 10 N force cap. The muscle at
+position $s$ follows $a(s, t)$, so a narrow waist travels along the tube at $c$ and pushes the ball ahead of it.</p>
+
+<p>In a real tube, the ring muscle is a hoop around the wall. Cut the tube lengthwise along a diameter and look at one
+half, of length $\Delta z$: the pressure $P$ inside pushes it outwards with a force $P \cdot 2r\,\Delta z$, and the hoop
+tension $T$ (force per unit length of tube) pulls it back at both cut edges, $2T\,\Delta z$. Balance gives
+<b>Laplace's law</b> for a cylinder:</p>
+
+$$P = \frac{T}{r}.$$
+
+<p>A hose of radius 5 mm squeezed by a hoop tension of 10 N/m holds a pressure of 2000 Pa; the same tension at radius
+2.5 mm holds 4000 Pa. A contracting ring gets more effective as it closes, which is why a squeeze, once started,
+completes easily. (A balloon, the doubly curved case from the <a href="18-pressure.html">pressure chapter</a>, has $P =
+2T/r$.) In the 2D demo each ring is a single strut across the tube, standing in for the two halves of the hoop.</p>
+
+<h3>How fast do the contents move?</h3>
+
+<p>If the contraction closes the tube completely behind the ball, the ball cannot slip back through it, and the
+contraction moves at $c$. So the ball moves at $c$: an <b>occlusive</b> wave carries its contents at the wave speed,
+whatever the wavelength. Industrial peristaltic pumps rely on exactly this, with rollers pinching a hose shut, so they
+deliver a fixed volume per roller pass.</p>
+
+<p>Occlusion is geometry. The ball (radius 6 cm) fits between the walls while the ring's length, measured between wall
+node centres, exceeds twice the sum of the ball radius and the wall node radius (1.5 cm). The ring's shortest length
+is $2R(1 - \varepsilon)$ with $R = 10$ cm, so the wave can grip the ball when</p>
+
+$$2R(1 - \varepsilon) &lt; 2(r_\text{ball} + r_\text{wall}) \quad\Longleftrightarrow\quad \varepsilon &gt; 1 - \frac{0.06 +
+0.015}{0.1} = 0.25.$$
+
+<p>The demo measures the ball's speed over the last three seconds and divides it by $c$. With strength 0.8, measured
+over 15 seconds, the ratio is 1.00 within a few percent for wave speeds from 0.1 to 1 m/s and wavelengths from 0.3 to
+1.2 m (the three-second readout wobbles more, because the ball's place on the slope of the contraction shifts a
+little). The threshold is sharp: at strength 0.25 and below the wave slides over the ball and the ratio is zero; from
+0.27 up it is 1. A bed of 24 grains (radius 1.8 cm) needs a much tighter squeeze, $\varepsilon &gt; 1 - (0.018 +
+0.015)/0.1 = 0.67$: at strength 0.4 the grains stay put, at 0.8 they move at $c$, though now and then a grain is
+squeezed back through a contraction, the way fluid leaks past a pump roller that does not quite close the hose.</p>
+
+<h2>Crawling</h2>
+
+<p>A worm has no wheels and nothing to push against but the ground, and every force its muscles make is internal: they
+sum to zero. So how does it go anywhere? Through friction that depends on direction. An earthworm's segments carry
+tiny bristles (setae) that slide easily forwards and dig in backwards. With such a ratchet, any change of length
+moves the body forward: a segment that shortens pulls its rear part forward (the front part cannot slide back), and a
+segment that lengthens pushes its front part forward (the rear cannot slide back).</p>
+
+<p>Each earthworm segment is a sealed bag of fluid with two muscle layers: circular muscles that squeeze it thin and
+long, and longitudinal muscles that pull it short and fat. The fluid's volume stays constant, so the two layers work
+against each other through it (a <b>hydrostatic skeleton</b>). In the demo's <i>crawling worm</i> each of ten 5 cm
+segments is one two-sided muscle whose length follows the activation, with $\varepsilon_\text{max} = 0.5 \times$
+strength, and is drawn with constant area, so short segments look fat. The wave runs from head to tail, as in real
+earthworms.</p>
+
+<p>The ground friction is the Coulomb friction from the <a href="16-contact-friction.html">contact chapter</a>, with a
+coefficient that depends on which way the node is sliding:</p>
+
+<pre><code class="language-js">function groundFriction(i, dn) {                // dn: how far the ground pushed node i up this substep
+  const slide = P.x[i] - P.px[i];               // +x is forward, towards the head
+  const mu = slide &gt; 0 ? muForward : muBackward;
+  const maxCancel = mu * dn;                    // Coulomb: at most mu times the normal correction
+  if (Math.abs(slide) &lt;= maxCancel) P.x[i] = P.px[i];
+  else P.x[i] -= Math.sign(slide) * maxCancel;
+}</code></pre>
+
+<h3>Predicting the crawling speed</h3>
+
+<p>Here is a calculation you can do on paper, and it predicts the demo well. Measure position along the body from the
+head with a material coordinate $s$. A segment's strain is $-\varepsilon\, a(s - ct)$. Add up the length changes from
+the head to $s$ and differentiate in time, and the velocity of the body at $s$ comes out as</p>
+
+$$v(s) = V_0 - \varepsilon\, c\; a(s - ct),$$
+
+<p>where $V_0$ is the same for the whole body. Parts with low activation move forwards faster than parts with high
+activation. Which $V_0$? The worm moves slowly, so inertia is negligible and the friction forces must cancel. With equal
+weight per unit length, the forward-sliding fraction of the body times $\mu_f$ must equal the backward-sliding
+fraction times $\mu_b$. The body slides forward where $a &lt; q = V_0/(\varepsilon c)$, so if $F(q)$ is the fraction of
+a wavelength where $a &lt; q$,</p>
+
+$$\mu_f\, F(q) = \mu_b\,\big(1 - F(q)\big) \quad\Longrightarrow\quad F(q) = \frac{\mu_b}{\mu_b + \mu_f}, \qquad
+\bar v = \varepsilon\,c\,\big(q - \langle a \rangle\big),$$
+
+<p>where $\langle a \rangle = 5/16$ is the mean activation. For the bump shape, $F(q) = \tfrac1\pi \arccos(1 -
+2q^{1/3})$, which inverts to $q = \big(\tfrac12(1 - \cos \pi F)\big)^3$.</p>
+
+<ul>
+<li><b>Perfect ratchet</b> ($\mu_f \to 0$): $F \to 1$, $q \to 1$ and $\bar v = \tfrac{11}{16}\,\varepsilon c$. The
+fully contracted parts are the anchors, exactly what earthworms do: they plant their short, fat segments and move the
+long, thin ones. With $\varepsilon = 0.4$ and $c = 0.2$ m/s, that is 5.5 cm/s.</li>
+<li><b>The demo's setae</b> ($\mu_b = 1$, $\mu_f = 0.1$): $F = 0.909$, $q = 0.940$ and $\bar v = 0.628\,\varepsilon c
+= 5.02$ cm/s. The demo measures 5.09 cm/s.</li>
+<li><b>Isotropic friction</b> ($\mu_b = \mu_f$): $F = 1/2$, so $q$ is the median activation, $(1/2)^3 = 0.125$, below
+the mean, and $\bar v = -0.1875\,\varepsilon c = -1.5$ cm/s. The worm crawls <i>backwards</i>. The demo measures
+exactly $-1.50$ cm/s. The direction of travel is set by the friction, not by the wave.</li>
+</ul>
+
+<p>These numbers use a wavelength of 0.5 m, so the body holds exactly one wave and $F$ really is the fraction of the
+body; with other wavelengths the fraction fluctuates and the agreement is within about 10%. With zero forward friction
+the worm coasts on its own momentum and goes faster than the prediction, because the quasi-static assumption fails.
+An <b>inchworm</b> (and the inchworm robots built from it) is the same calculation with only two feet: anchor the rear,
+extend, anchor the front, contract.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>write the muscle constraint</h4>
+<p>Open the starter (<a href="../code/run.html?src=20-active-materials/starter.js" target="_blank">run it</a>,
+<a href="../code/20-active-materials/starter.js" target="_blank">read it</a>). Nothing contracts, because
+<code>solveMuscle</code> is empty. Implement it: the rest length from the activation, the slack test for tension-only
+muscles, the XPBD update, the force cap as a clamp on the accumulated multiplier, and the position correction. Test it
+in <i>muscle under load</i>: with a 0.5 kg weight the shortening readout should read 8.95 cm while the muscle is on.
+Then raise the load above the cap and check that the muscle gives way.</p>
+</div>
+
+<details class="hint"><summary>Hint: the sign of the clamp</summary>
+<p>A stretched fibre has $C &gt; 0$ and produces $\Delta\lambda &lt; 0$. Tension is negative $\lambda$, so a
+tension-only muscle keeps $\lambda$ in $[-F_\text{max}h^2, 0]$; a two-sided one (the worm's segments) in
+$[-F_\text{max}h^2, F_\text{max}h^2]$. Clamp the accumulated value $\lambda + \Delta\lambda$, then apply only the change
+that survives the clamp.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>See <a href="../code/20-active-materials/solution.js" target="_blank">solution.js</a>; the body is the
+<code>solveMuscle</code> listing earlier in this chapter, plus <code>m.force = -lam / (h * h)</code> for the
+readouts.</p>
+</details>
+
+<div class="exercise">
+<h4>drive a wave and predict the transport</h4>
+<p>Implement <code>waveActivation(s, t)</code> as a bump travelling at $c$. Before running the tube, predict the ratio
+of the ball's speed to the wave speed with strength 0.8, and the strength below which the ball is not carried at all.
+Then measure both with the readout <i>contents speed / wave speed</i>. Does the ratio depend on the wavelength?</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>An occlusive wave carries the ball at $c$, so the ratio is 1. Occlusion needs $2R(1 - \varepsilon) &lt; 2(r_\text{ball}
++ r_\text{wall})$. For the phase, JavaScript's <code>%</code> returns a negative result for a negative left operand, so
+add 1 when it is negative.</p>
+</details>
+
+<div class="exercise">
+<h4>make the worm crawl</h4>
+<p>The starter's <code>groundFriction</code> uses the backward coefficient in both directions. With the first two
+exercises done, run the worm and measure its speed: it crawls backwards. Check the number against the isotropic prediction. Then make the coefficient
+depend on the sliding direction, and predict the speed for $\mu_b = 1$ and $\mu_f = 0.3$ with the formula from this
+chapter before measuring it.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>$F = 1/1.3 = 0.769$, $q = \big(\tfrac12(1 - \cos 0.769\pi)\big)^3$, and $\bar v = \varepsilon c\,(q - 5/16)$ with
+$\varepsilon = 0.4$, $c = 0.2$ m/s. You should get about 2.85 cm/s; the demo measures about 2.85.</p>
+</details>
+
+<div class="exercise">
+<h4>active strain against active stress</h4>
+<p>Implement <code>activeStressForce</code>: $a F_\text{max} f_L(\ell)$ with the linear force-length factor. For loads of
+0.5, 1 and 1.5 kg and a 20 N cap, write down the shortening you expect from each law, then measure. Finally, with a
+10 g load, a 1000 N cap and a time constant of 0, compare the peak speed of the two laws, and explain why the
+time constant helps one much more than the other.</p>
+</div>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">function activeStressForce(m) {
+  const len = Math.hypot(P.x[m.b] - P.x[m.a], P.y[m.b] - P.y[m.a]);
+  const shortest = m.L0 * (1 - m.strainMax);
+  const fl = Math.max(0, Math.min(1, (len - shortest) / (m.L0 - shortest)));
+  return m.act * m.cap * fl;
+}</code></pre>
+<p>The shortenings are in the table above. With the snap, active strain peaks near 44 m/s and active stress near
+90 m/s. A time constant of 50 ms brings active strain down to about 2 m/s because its rest length then moves slowly,
+but active stress still peaks at 24 m/s: its force reaches 1000 N within a few time constants whatever the node does,
+and 1000 N on 10 g is an acceleration of $10^5$ m/s&sup2;.</p>
+</details>
+
+<h2>Summary</h2>
+<ul>
+<li>An <b>active material</b> makes force on command. Drive a constraint with an activation $a \in [0, 1]$:
+<b>active strain</b> shortens its rest length, $L = L_0(1 - \varepsilon_\text{max} a)$; <b>active stress</b> adds a
+contractile force $a F_\text{max} f_L(\ell)$.</li>
+<li>A <b>muscle constraint</b> is a tension-only XPBD distance constraint ($\lambda \le 0$) with a force cap ($|\lambda|
+\le F_\text{max}h^2$). Capped active strain is a position servo with a force limit; active stress is a force source.</li>
+<li>Snapping an activation injects energy. Ramp it with <b>activation dynamics</b> ($\tau$ of tens of ms), a speed limit
+on the actuator rather than on the bodies.</li>
+<li>A <b>travelling wave</b> $a(s, t) = f(s - ct)$ moves contents at the wave speed when it is occlusive. A ring's
+squeeze is governed by <b>Laplace's law</b>, $P = T/r$.</li>
+<li><b>Crawling</b> needs direction-dependent friction. The quasi-static speed is $\varepsilon c(q - \langle a\rangle)$,
+with $q$ fixed by $\mu_f F(q) = \mu_b(1 - F(q))$; isotropic friction can send a worm backwards.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Why is a muscle constraint an inequality, and what is clamped to cap its force?</li>
+<li>A hose of radius 8 mm must hold a pressure of 5 kPa at a squeeze. What hoop tension does the ring need?</li>
+<li>A peristaltic wave of wavelength 0.4 m runs at 0.3 m/s and closes the tube completely. How fast do the contents
+move, and how often does each point of the tube contract?</li>
+<li>Why does instant activation make a stiff muscle fling a light node, and why is an activation time constant a more
+honest fix than clamping the node's velocity?</li>
+<li>With perfect setae, which segments of a crawling earthworm are standing still?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

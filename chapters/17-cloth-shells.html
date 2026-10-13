@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloth and Thin Shells · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="17-cloth-shells" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Cloth and Thin Shells</h1>
+<p class="subtitle">A sheet of particles that barely stretches, bends at a touch, and tears when pulled too hard.</p>
+
+<p>Pick up a handkerchief by two corners. It sags, folds, swings, and the folds settle in places that look
+effortless and are hard to predict. Now pick up a sheet of paper the same way: it bends into a smooth curve but will
+not fold the way the handkerchief does. Both are <b>thin shells</b>, surfaces whose thickness is tiny compared with
+their size, and both obey the same rule: they resist stretching enormously and resist bending hardly at all. How much
+"hardly" is, is what separates a silk scarf from a sheet of paper from a tin roof.</p>
+
+<p>You already have every tool needed to simulate them. A rope (<a href="07-pbd.html">PBD</a>,
+<a href="08-xpbd.html">XPBD</a>) is a line of particles held by distance constraints; cloth is a grid of them. This
+chapter adds the two ingredients that a line does not need: constraints against <b>shear</b>, and a way to resist
+<b>bending</b> of a surface. It then works out why thin sheets behave the way they do, from the two stiffnesses of a
+shell, so you can set the constraint compliances from a real thickness and stiffness instead of by guesswork.</p>
+
+<p>By the end you will have a cloth that swings, drapes over a ball, flaps in the wind and tears, and you will be
+able to say how stiff its bending should be relative to its stretching for a sheet of a given thickness.</p>
+
+<h2>A grid of particles</h2>
+
+<p>Lay out an $N \times N$ grid of particles with spacing $\ell$. The demo uses $N = 25$ and $\ell = 4$ cm, a
+square of 0.96 m. Give the cloth an <b>areal density</b> $\rho_A$, mass per area, and share it among the particles:
+for a medium cotton, $\rho_A = 0.2$ kg/m<sup>2</sup>, so the whole square weighs 0.184 kg and each of its 625
+particles about 0.29 g. Integrate them as usual, gravity included. Then connect them with three kinds of
+constraint.</p>
+
+<ul>
+<li><b>Structural (stretch)</b>: each particle to its right and lower neighbour. These hold the length of the
+threads, the main job of cloth.</li>
+<li><b>Shear</b>: both diagonals of each square. Without them, a square of four stretch constraints can collapse into
+a thin rhombus without changing any length. This is a <i>mechanism</i>, a motion that costs nothing, and a grid
+without shear constraints drapes like a fishing net.</li>
+<li><b>Bending</b>: something that resists folding the surface along a line. This one needs thought, and has its own
+section below.</li>
+</ul>
+
+<p>Each type gets its own XPBD compliance $\alpha$ (the inverse of a stiffness), so you can make the cloth nearly
+inextensible along its threads, softer in shear and very soft in bending, as real fabric is. The distance constraint
+is the one from the XPBD chapter, written in 3D:</p>
+
+<pre><code class="language-js">function solveDistance(c, alphaTilde) {           // alphaTilde = alpha / h^2
+  const a = c.a, b = c.b, wsum = w[a] + w[b];
+  if (wsum === 0) return;
+  const dx = x[a] - x[b], dy = y[a] - y[b], dz = z[a] - z[b];
+  const len = Math.hypot(dx, dy, dz);
+  const C = len - c.rest;
+  const dlambda = (-C - alphaTilde * c.lambda) / (wsum + alphaTilde);
+  c.lambda += dlambda;
+  const s = dlambda / len;                          // gradient wrt a is (xa - xb) / len
+  x[a] += w[a] * s * dx;  y[a] += w[a] * s * dy;  z[a] += w[a] * s * dz;
+  x[b] -= w[b] * s * dx;  y[b] -= w[b] * s * dy;  z[b] -= w[b] * s * dz;
+}</code></pre>
+
+<p>The demo runs 15 substeps per frame with one pass over every constraint per substep, the scheme from the
+<a href="09-substepping.html">substepping chapter</a>. <b>Pinning</b> a particle is setting its inverse mass $w$ to
+zero, which every constraint already respects.</p>
+
+<div class="demo" data-src="17-cloth-shells/solution.js" data-height="560"
+     data-caption="A 25 &times; 25 particle cloth with XPBD constraints. Drag it with the mouse; switch the bending model."></div>
+
+<p>The cloth starts horizontal, pinned at two corners, and swings down. Drag it with the mouse, turn on the wind, try
+the drape over the sphere, and switch the bending model. The view sliders rotate the camera. The picture is a small
+orthographic projection written in the demo file itself (rotate about the vertical axis by the yaw, then about the
+horizontal axis by the pitch, drop the depth) with the triangles drawn back to front.</p>
+
+<h2>How inextensible is inextensible?</h2>
+
+<p>Look at the readout "largest stretch". With the default stretch compliance of $10^{-7}$ m/N, an edge stiffness of
+10 million N/m, a link of a hanging 0.18 kg cloth should stretch by far less than a micrometre. Yet the readout says
+almost 6 %, at the two pinned corners. Set the compliance to $10^{-8}$ or $10^{-5}$: the number does not change.</p>
+
+<p>This is the solver, not the material. One Gauss-Seidel pass per substep moves information one constraint at a
+time, and the whole weight of the cloth funnels into the few edges at each pin. The <a href="10-linear-solvers.html">
+solvers chapter</a> explains why: an iterative solver at a fixed iteration count has a maximum effective stiffness,
+and any compliance below it behaves the same. Only above about $10^{-3}$ m/N does the compliance itself become
+visible. Averaged over the whole cloth the stretch is only 0.11 %, which is why it still looks like cloth. If you need
+less, the options are more substeps, more iterations, or <i>long range attachments</i> (Kim, Chentanez and
+M&uuml;ller, 2012), extra one-sided constraints from each particle to the pins that cap the total stretch.</p>
+
+<h2>Bending</h2>
+
+<h3>The cheap way: second neighbours</h3>
+
+<p>The oldest trick adds a distance constraint between particles two apart along each row and column, $(i, j)$ to
+$(i + 2, j)$. If the cloth folds at the middle particle by an angle $\theta$, the two links of length $\ell$ form a
+V, and the distance across it shrinks from $2\ell$ to $2\ell\cos(\theta/2)$. So the constraint is</p>
+
+$$C = 2\ell\cos(\theta/2) - 2\ell \approx -\frac{\ell\,\theta^2}{4}.$$
+
+<p>It is easy to build, uses the distance code you already have, and works. But look at the shape of $C$: it is
+quadratic in the fold angle, so its energy $\tfrac12 k C^2$ is <i>quartic</i>. At small angles the constraint has no
+stiffness at all (its gradient with respect to $\theta$ is zero at $\theta = 0$), and at large angles it is very stiff.
+Small wrinkles cost nothing, big folds cost a lot. It also resists in-plane compression, which is not bending at all.
+Cloth looks fine with it. A sheet of metal does not.</p>
+
+<h3>The proper way: the dihedral angle</h3>
+
+<p>Triangulate the grid (two triangles per square). Every interior edge is shared by two triangles, a <b>hinge</b>.
+The angle $\theta$ between the two triangles' normals, zero when they are coplanar, is the <b>dihedral angle</b>, and
+it measures the local fold directly. The bending constraint is</p>
+
+$$C = \theta - \theta_0,$$
+
+<p>with $\theta_0$ the rest angle (zero for a flat cloth, nonzero for a pre-curved shell such as a hat brim or a
+leaf). Its energy is quadratic in the angle, like a linear spring, which is what the elastic theory of plates says it
+should be.</p>
+
+<p>For a hinge with shared edge $\mathbf{x}_3\mathbf{x}_4$ and wing vertices $\mathbf{x}_1$ and $\mathbf{x}_2$, let
+$\mathbf{E} = \mathbf{x}_4 - \mathbf{x}_3$ and take the (unnormalised) triangle normals
+$\mathbf{N}_1 = (\mathbf{x}_1 - \mathbf{x}_3)\times(\mathbf{x}_1 - \mathbf{x}_4)$ and
+$\mathbf{N}_2 = (\mathbf{x}_2 - \mathbf{x}_4)\times(\mathbf{x}_2 - \mathbf{x}_3)$. With unit normals
+$\hat{\mathbf{n}}_1$, $\hat{\mathbf{n}}_2$ and unit edge $\hat{\mathbf{e}}$, a signed angle that is smooth through
+zero is</p>
+
+$$\theta = \operatorname{atan2}\big((\hat{\mathbf{n}}_1\times\hat{\mathbf{n}}_2)\cdot\hat{\mathbf{e}},\;
+\hat{\mathbf{n}}_1\cdot\hat{\mathbf{n}}_2\big).$$
+
+<p>Using $\arccos(\hat{\mathbf{n}}_1\cdot\hat{\mathbf{n}}_2)$ instead loses the sign and has an infinite derivative
+at exactly the flat rest state, which is why the formula in M&uuml;ller et al.'s original <i>Position Based
+Dynamics</i> paper (2007, whose appendix derives an arccos-based bending constraint) needs special care there.</p>
+
+<p>The gradients have a beautiful closed form, given by Bridson, Marino and Fedkiw in <i>Simulation of Clothing with
+Folds and Wrinkles</i> (2003), who call them the bending modes $\mathbf{u}_1 \dots \mathbf{u}_4$:</p>
+
+$$\mathbf{u}_1 = |\mathbf{E}|\frac{\mathbf{N}_1}{|\mathbf{N}_1|^2}, \qquad
+\mathbf{u}_2 = |\mathbf{E}|\frac{\mathbf{N}_2}{|\mathbf{N}_2|^2},$$
+
+$$\mathbf{u}_3 = \frac{(\mathbf{x}_1 - \mathbf{x}_4)\cdot\mathbf{E}}{|\mathbf{E}|}\frac{\mathbf{N}_1}{|\mathbf{N}_1|^2}
++ \frac{(\mathbf{x}_2 - \mathbf{x}_4)\cdot\mathbf{E}}{|\mathbf{E}|}\frac{\mathbf{N}_2}{|\mathbf{N}_2|^2}, \qquad
+\mathbf{u}_4 = -\frac{(\mathbf{x}_1 - \mathbf{x}_3)\cdot\mathbf{E}}{|\mathbf{E}|}\frac{\mathbf{N}_1}{|\mathbf{N}_1|^2}
+- \frac{(\mathbf{x}_2 - \mathbf{x}_3)\cdot\mathbf{E}}{|\mathbf{E}|}\frac{\mathbf{N}_2}{|\mathbf{N}_2|^2}.$$
+
+<p>The wing gradients are perpendicular to their own triangle, inversely proportional to its height above the edge;
+the edge vertices take whatever balances them, so that the four sum to zero (moving the whole hinge does not change its
+angle). With the sign convention of the atan2 above, $\nabla_i\theta = -\mathbf{u}_i$. Signs are the classic trap
+here, so the demo was checked against finite differences of $\theta$; they agree to eight digits. With $C$ and its four
+gradients, the XPBD update is the usual one:</p>
+
+$$\Delta\lambda = \frac{-C - \tilde\alpha\lambda}{\sum_i w_i|\nabla_i C|^2 + \tilde\alpha}, \qquad
+\Delta\mathbf{x}_i = w_i\,\nabla_i C\,\Delta\lambda.$$
+
+<p>Grinspun, Hirani, Desbrun and Schr&ouml;der's <i>Discrete Shells</i> (2003) built the corresponding energy, the
+squared change of dihedral angle weighted by the edge length over the triangles' heights, derived from the bending
+energy of a continuous shell. That weighting is what connects a hinge's
+stiffness to a material's, below.</p>
+
+<p>Try both in the demo on the sphere with the bending compliance at 1. The second-neighbour cloth drapes in soft
+folds, because small bends are free. The dihedral cloth stays a smooth, stiff sheet bent in one direction only, like a
+sheet of plastic laid over a ball. The next section explains why that one direction is no accident.</p>
+
+<h2>Thin shells: stretching versus bending</h2>
+
+<p>Why does every thin sheet bend so much more easily than it stretches? Take a plate of thickness $t$, Young's
+modulus $E$ and Poisson's ratio $\nu$ (the <a href="12-beams.html">beams chapter</a> introduced both).</p>
+
+<p>Stretching it involves the whole thickness. The force per unit width needed for a strain $\varepsilon$ is
+$E t\,\varepsilon$, so the <b>membrane stiffness</b> is</p>
+
+$$k_{\text{membrane}} \sim E\,t \quad \text{(N/m)}.$$
+
+<p>Bending it stretches one face and compresses the other, and the material in the middle does nothing. Exactly as
+for a beam's $EI$, where the second moment of area of a rectangle of width $b$ and height $t$ is $bt^3/12$, the
+<b>bending stiffness</b> per unit width of a plate is</p>
+
+$$D = \frac{E\,t^3}{12\,(1 - \nu^2)} \quad \text{(N m)}.$$
+
+<p>The factor $1/(1 - \nu^2)$ appears because a plate, unlike a narrow beam, cannot contract sideways freely when it
+bends. The two stiffnesses have different units, so compare them through their ratio, which has units of one over
+area:</p>
+
+$$\frac{E\,t}{D} = \frac{12\,(1 - \nu^2)}{t^2}.$$
+
+<p>The material drops out entirely. Only the thickness matters, and it matters squared. For a 1 mm sheet with $\nu =
+0.3$ the ratio is $1.09\times10^{7}$ m<sup>-2</sup>; for 2 mm it is a quarter of that, $2.73\times10^{6}$
+m<sup>-2</sup>. Halve the thickness and bending becomes four times easier relative to stretching.</p>
+
+<p>Put it into a picture you can feel. A strip 10 cm long, clamped at one end: pulling its tip along its length
+needs a stiffness $E t b/L$; pushing it sideways, as a cantilever, needs $3 D b/L^3$. Their ratio is $4(1 - \nu^2)
+(L/t)^2$, which for a 1 mm sheet is 36,400. Pushing the tip sideways is more than thirty thousand times easier than
+pulling it. Or compare energies: bending a 1 mm sheet into a curve of radius 10 cm stores as much energy as stretching
+it by 0.3 %.</p>
+
+<h3>Why tablecloths fold</h3>
+
+<p>That huge ratio has a geometric consequence that you can see in the demo. A flat sheet can be bent into a cylinder
+or a cone without stretching anywhere: those surfaces are <b>developable</b>. It cannot be shaped over a sphere without
+stretching, because a sphere is curved in two directions at once (Gauss's <i>Theorema Egregium</i>: you cannot flatten
+an orange peel without tearing it). A stiff-in-stretch, soft-in-bend sheet laid over a ball therefore does the only
+cheap thing available: it bends in one direction, like the dihedral cloth at compliance 1, or, if bending is cheap
+enough, it gathers into folds, each of which is locally a cylinder. A tablecloth over a round table, a skirt, a flag:
+all their folds are thin shells avoiding stretch.</p>
+
+<h3>From material to compliance</h3>
+
+<p>To set the compliances from a real sheet, match the discrete stiffnesses to the continuous ones.</p>
+
+<ul>
+<li>On a square grid stretched along its rows, one link carries the load of a strip of width $\ell$ and has length
+$\ell$, so the link stiffness equals the membrane stiffness per width: $k_{\text{link}} = E t$, and
+$\alpha_{\text{stretch}} = 1/(E t)$.</li>
+<li>Bend the grid into a cylinder of radius $R$ about one of its axes. On this triangulation, the hinges across one
+set of grid edges each turn by $\ell/R$ and the others not at all, one hinge per square of area $\ell^2$. The hinge
+energy per area is then $\tfrac12 k_\theta(\ell/R)^2/\ell^2$, and setting it equal to the plate's $\tfrac12 D/R^2$
+gives $k_\theta = D$, so $\alpha_{\text{bend}} = 1/D$. On other meshes the factor differs (this is what the edge
+length and height weights in <i>Discrete Shells</i> take care of), but it stays of order one.</li>
+</ul>
+
+<p>The demo inverts this and reports, from your two compliances, the thickness of the plate they represent:
+$t = \sqrt{12(1-\nu^2)\,\alpha_{\text{stretch}}/\alpha_{\text{bend}}}$. Real fabrics come out thinner than they are,
+because their threads slide and twist past each other and bend far more easily than a solid plate of the same
+thickness. A cotton with $E t \approx 1000$ N/m and $D \approx 10^{-5}$ N m behaves like a solid plate a third of a
+millimetre thick.</p>
+
+<div class="note">
+<p><b>Why cloth simulation is hard in one sentence.</b> The ratio $E t/D$ is in the millions per square metre, so a
+cloth is a system whose stretching modes are thousands of times stiffer than its bending modes, and the fast modes
+set the time step (the <a href="04-time-integration.html">integration chapter</a>'s $h\omega$). Position-based
+methods made cloth practical in real time precisely because they treat the stiff stretch as a near-hard constraint
+instead of a fast spring.</p>
+</div>
+
+<h2>Anisotropy, rest shapes, wind and pins</h2>
+
+<p><b>Anisotropy.</b> Woven fabric has two thread directions, the <i>warp</i> and the <i>weft</i>, and is stiff along
+both. Pulled at 45&deg;, along the <i>bias</i>, it stretches easily, because the weave can shear. In our model that is
+simply a softer shear compliance than stretch compliance (the default is $10^{-3}$ m/N against $10^{-7}$). Give the
+horizontal and vertical links different compliances and you have a fabric with different warp and weft. Knits are
+stretchy along both threads and want soft stretch too.</p>
+
+<p><b>Rest shapes.</b> A nonzero rest angle $\theta_0$ per hinge, measured from a curved initial mesh, gives a shell
+with a natural shape: a leaf, a cap, the curl of a ribbon. The demo measures every hinge's rest angle when it builds
+the cloth.</p>
+
+<p><b>Wind and drag.</b> Air pushes on a surface mostly along its normal. For each triangle with unit normal
+$\hat{\mathbf{n}}$, area $A$ and average velocity $\mathbf{v}$, a simple linear model applies a force
+$\mathbf{F} = -c\,A\,\big((\mathbf{v} - \mathbf{v}_{\text{wind}})\cdot\hat{\mathbf{n}}\big)\,\hat{\mathbf{n}}$, a third
+to each corner. A sail moving with the wind feels nothing; a sail edge-on to it feels nothing either. The demo uses
+$c = 1$ kg/(m<sup>2</sup>s) and caps each corner's velocity change so the drag can stop motion but never reverse it,
+which keeps it stable even on badly stretched triangles. Real air drag is closer to quadratic in speed, and
+real flags flutter because of vortices this model ignores, but it gives convincing billowing.</p>
+
+<p><b>Collisions.</b> The sphere and the floor use the particle-against-surface push-out and positional friction from
+the <a href="16-contact-friction.html">previous chapter</a>, with a contact thickness of 8 mm so the cloth does not
+show through. The cloth does not collide with itself; adding that means the spatial hash of the
+<a href="15-collision-detection.html">collision chapter</a> plus a minimum distance between particles, and, for
+reliable results, care about tunnelling, since cloth is the thinnest object you will ever simulate.</p>
+
+<h2>Tearing</h2>
+
+<p>Tearing is a rule about constraints: if a structural or shear constraint is stretched beyond a threshold, say 1.3
+times its rest length, delete it. Everything that depended on it has to go too: the triangles that used the edge
+(so they are no longer drawn and no longer catch wind), the hinges between those triangles, and the second-neighbour
+constraints that spanned the edge.</p>
+
+<pre><code class="language-js">for (const c of stretchAndShear)
+  if (c.alive &amp;&amp; dist(c.a, c.b) &gt; tearAt * c.rest) c.alive = false;
+// then: a triangle is alive only if its three edges are; a hinge only if both its triangles are</code></pre>
+
+<p>Turn on tearing and pull on the cloth. Grab a single particle and pull, and the particle tears out on its own: all
+the force goes through its handful of links, a stress concentration. Real tears also start where stress
+concentrates, at a notch or a hole: once a hole exists, the links around its rim carry more than their share of the
+load, which is why tears grow from holes.</p>
+
+<p>Deleting constraints leaves the particles shared between the two sides of a tear, so a torn edge is ragged and
+the separated flaps still share corner particles. Production cloth tears by <i>splitting</i> instead: duplicate the
+particles along the crack and give each side its own copy, so the mesh separates cleanly.</p>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>make the cloth hold together</h4>
+<p>Open the starter (<a href="../code/run.html?src=17-cloth-shells/starter.js" target="_blank">run it</a>,
+<a href="../code/17-cloth-shells/starter.js" target="_blank">read it</a>). Nothing connects the particles: the cloth
+falls away from its pins. Implement <code>solveDistance</code>, the XPBD distance constraint, and then add the two
+diagonals of each square to the shear list in <code>reset</code>. When it works, the cloth swings down and hangs.
+Then raise the shear compliance to its maximum and drape the cloth over the sphere. What changes, and why?</p>
+</div>
+
+<details class="hint"><summary>Hint: the diagonals</summary>
+<p>The square with corner $(i, j)$ has corners <code>id(i, j)</code>, <code>id(i + 1, j)</code>,
+<code>id(i + 1, j + 1)</code> and <code>id(i, j + 1)</code>. Its diagonals join the first to the third and the second
+to the fourth.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Compare with <a href="../code/17-cloth-shells/solution.js" target="_blank">solution.js</a>. The constraint is the
+code in "A grid of particles" above; the shear constraints are:</p>
+<pre><code class="language-js">for (let j = 0; j &lt; N - 1; j++) for (let i = 0; i &lt; N - 1; i++) {
+  addDistance(shear, id(i, j), id(i + 1, j + 1));
+  addDistance(shear, id(i + 1, j), id(i, j + 1));
+}</code></pre>
+<p>With very soft shear the cloth hugs the ball much more closely. A grid whose squares can turn into rhombi can
+cover a doubly curved surface without stretching any thread (a <i>Chebyshev net</i>; it is how a woven fabric is
+fitted over a curved shape), so the shear mechanism lets it avoid the folds that a shear-stiff sheet needs. Hang it
+as a curtain instead and the same freedom lets its top edge sag further between the pins.</p>
+</details>
+
+<div class="exercise">
+<h4>add bending, two ways</h4>
+<p>Fill in the second-neighbour constraints in <code>reset</code>, one along each row and one along each column for
+every particle that has two neighbours beyond it. The dihedral-angle constraint is already written; read
+<code>dihedralAngle</code> and <code>solveDihedral</code> and match them to the formulas above. Then, on the sphere,
+compare "none", "second neighbours" and "dihedral angle" at bending compliances of $10^3$ and of 1. Explain what you see
+using the shape of each constraint's energy for small fold angles.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>Use <code>addBend2(id(i, j), id(i + 1, j), id(i + 2, j))</code> when <code>i &lt; N - 2</code>, and the same with
+<code>j</code> along the column. At compliance 1 the dihedral cloth is stiff for every fold, small or large, and
+bends into one smooth curve; the second-neighbour cloth still forms small folds because its energy grows as
+$\theta^4$, so small folds are almost free.</p>
+</details>
+
+<div class="exercise">
+<h4>the thickness ratio, before and after</h4>
+<p>On paper: compute $E t / D$ for a 1 mm and a 2 mm sheet with $\nu = 0.3$, and the ratio of the two. Then compute the
+compliances that represent a 1 mm plastic sheet with $E = 2$ GPa, using $\alpha_{\text{stretch}} = 1/(Et)$ and
+$\alpha_{\text{bend}} = 1/D$. Set them in the demo (the sliders are logarithmic; get close) and check that the
+"equivalent shell thickness" readout says about 1 mm. Drop that sheet on the sphere. Then make it 2 mm by changing only
+the bending compliance: by what factor?</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>$12(1-\nu^2)/t^2$ gives $1.09\times10^{7}$ and $2.73\times10^{6}$ m<sup>-2</sup>, a factor of 4. For the plastic
+sheet, $E t = 2\times10^6$ N/m, so $\alpha_{\text{stretch}} = 5\times10^{-7}$ m/N, and $D = 0.183$ N m, so
+$\alpha_{\text{bend}} = 5.46$. Doubling the thickness at fixed $E t$ would need $D$ four times larger, so the
+bending compliance four times smaller. (Doubling a real sheet's thickness also doubles $E t$; the readout only sees the
+ratio.)</p>
+</details>
+
+<div class="exercise">
+<h4>tear it</h4>
+<p>Implement the first loop of <code>tear</code>: mark structural and shear constraints dead when they stretch beyond
+the threshold. The bookkeeping for triangles, hinges and second-neighbour constraints is already there. Turn on
+tearing and pull the cloth with the mouse. Then lower the threshold to 1.05 and reset the curtain without touching
+it: where does it tear first, and why there?</p>
+</div>
+
+<details class="hint"><summary>Solution</summary>
+<pre><code class="language-js">for (const list of [stretch, shear]) {
+  for (const c of list) {
+    if (c.alive &amp;&amp; dist(c.a, c.b) &gt; tearAt.value * c.rest) { c.alive = false; tornCount++; }
+  }
+}</code></pre>
+<p>At a low threshold the cloth tears at the pinned corners first: the whole weight of the cloth, and the jerk of the
+swing, passes through the few links around each pin, which is also where the "largest stretch" readout peaks.</p>
+</details>
+
+<div class="paper">
+<h4>from edges to the deformation gradient</h4>
+<p>None of the three papers simulates cloth, but this chapter's central move, giving each kind of deformation its own
+stiffness taken from the material, is the one the MPM chapters make in full. A distance constraint measures the
+stretch of one edge. The MPM course notes measure all stretching and shearing at once with the deformation gradient
+$\mathbf{F}$, and their hyperelastic energy densities $\Psi(\mathbf{F})$ play the role of our separate compliances: the
+Lam&eacute; parameter $\mu$ prices shear and the Lam&eacute; $\lambda$ prices volume change, both computed from $E$ and
+$\nu$ exactly as we computed $Et$ and $D$. When you reach <a href="21-deformation.html">The Deformation Gradient</a>,
+think of $\mathbf{F}$ as every edge of this chapter's grid measured in one matrix.</p>
+</div>
+
+<h2>Summary</h2>
+<ul>
+<li>Cloth is a grid of particles with <b>stretch</b>, <b>shear</b> and <b>bending</b> constraints, each with its own XPBD
+compliance. Shear constraints remove the free rhombus mechanism of a square grid.</li>
+<li><b>Second-neighbour</b> bending is cheap but its energy grows as $\theta^4$: small folds are free and it also resists
+compression. <b>Dihedral-angle</b> bending, $C = \theta - \theta_0$ with Bridson's gradients, is quadratic in the angle
+like a real plate.</li>
+<li>A thin shell has membrane stiffness $\sim Et$ and bending stiffness $D = Et^3/(12(1-\nu^2))$. Their ratio,
+$12(1-\nu^2)/t^2$, depends only on thickness: thin sheets bend easily and barely stretch.</li>
+<li>Sheets avoid stretch by bending into developable shapes or folds; that is why cloth over a ball folds.</li>
+<li>On a square grid, $\alpha_{\text{stretch}} \approx 1/(Et)$ and $\alpha_{\text{bend}} \approx 1/D$.</li>
+<li>Below a certain compliance the stretch you see is set by solver convergence, not by the material.</li>
+<li><b>Tearing</b> deletes over-stretched constraints and everything that depended on them; splitting particles gives
+cleaner tears.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>What goes wrong with a cloth grid that has stretch constraints but no shear constraints?</li>
+<li>Why does the second-neighbour bending constraint have no stiffness for a small fold?</li>
+<li>A 0.5 mm sheet and a 3 mm sheet of the same material: how many times larger is $Et/D$ for the thinner one?</li>
+<li>Why can a sheet of paper be rolled into a tube but not wrapped smoothly around a ball?</li>
+<li>Your cloth stretches 5 % at the pins whatever stretch compliance you choose. Name two ways to reduce it.</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

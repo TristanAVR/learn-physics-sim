@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coupling Two Solvers · Learn Physics Simulation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/chapters.js"></script>
+<script defer src="../assets/site.js"></script>
+</head>
+<body data-chapter="19-coupling" data-root="..">
+<button id="menu-toggle">&#9776; Contents</button>
+<nav id="sidebar"></nav>
+<main>
+<article>
+<h1>Coupling Two Solvers</h1>
+<p class="subtitle">Two simulations that each work perfectly, and the one line of glue that makes them explode together.</p>
+
+<p>Sooner or later you will want two different solvers in one scene. A stiff rod, which converges only with a direct
+solver or hundreds of iterations, presses into a soft mattress that a handful of cheap Gauss-Seidel sweeps handles
+well. A cable lies on a trampoline. A rigid tool squeezes a jelly. Each part has its own best method, and often its own
+code, written by someone else. The only thing they share is the place where they touch.</p>
+
+<p>Gluing them together looks trivial: let the rod push on the mattress, let the mattress push back, exchange the
+numbers once per step. Try it, and with the wrong pair of stiffnesses the contact starts to chatter, then to bang, then
+the scene leaves the screen. Nothing is wrong with either solver. The glue is a numerical method of its own, with its
+own stability limit, and this chapter derives it.</p>
+
+<p>By the end you will be able to predict whether a coupling scheme converges from one ratio of stiffnesses, fix it by
+choosing which side receives which quantity, by relaxing, or (best) by telling the stiff solver how much the soft side
+gives, and you will know why that last trick needs the <i>row sums</i> of a matrix rather than its diagonal once
+several contacts share the soft side.</p>
+
+<h2>Monolithic or partitioned</h2>
+
+<p>There are two ways to simulate two bodies that touch. The <b>monolithic</b> way puts every equation of both bodies
+and the contact into one big system and solves it with one solver. That is what the constraint chapters did: a
+Gauss-Seidel loop does not care whether a constraint belongs to the rod, the mattress or the contact between them.
+It is the most robust choice, and the reference answer for everything in this chapter.</p>
+
+<p>The <b>partitioned</b> way keeps a separate solver per body and lets them talk only through interface values: the
+contact force, and the positions of the touching points. You choose it when the subsystems want different
+treatment:</p>
+
+<ul>
+<li><b>Different stiffness.</b> A near-rigid rod needs many iterations, or a direct solve (the
+<a href="10-linear-solvers.html">solvers chapter</a> showed why Gauss-Seidel crawls on stiff chains). A soft membrane
+converges in a few sweeps. In one monolithic loop, every soft constraint pays for the rod's iteration count.</li>
+<li><b>Different structure.</b> A rod is a chain: its matrix is banded and a tridiagonal direct solve costs almost
+nothing. A membrane is a sheet: its matrix is sparse but wide, and an iterative method suits it.</li>
+<li><b>Different code.</b> The cloth solver, the fluid solver and the rigid-body engine are often separate libraries
+with their own time steps. The interface is all you can touch.</li>
+</ul>
+
+<p>Partitioning buys flexibility and costs a new question: the two solvers must agree on the interface, and the
+agreement is reached by an iteration that may or may not converge. Let's look at the smallest example where it
+fails.</p>
+
+<h2>The toy: two springs in series</h2>
+
+<p>A hand pushes the top of a "rod" spring of stiffness $k_1$ down by a distance $d$. The rod's tip sits on a
+"membrane" spring of stiffness $k_2$ standing on the ground. Everything is static, and the contact is glued, so the
+algebra stays linear. The interface force $f$ compresses both springs. The rod is squeezed by $d - y$, where $y$ is
+how far the membrane surface has sunk, and the membrane is squeezed by $y$:</p>
+
+$$f = k_1 (d - y), \qquad f = k_2\, y \quad\Longrightarrow\quad f^* = \frac{k_1 k_2}{k_1 + k_2}\, d.$$
+
+<p>That is the monolithic answer: two springs in series. Now split it. Solver 1 owns the rod and solver 2 owns the
+membrane. The most natural division of labour is the one a contact suggests: the rod is pushed down onto the membrane,
+so the rod solver treats the membrane surface as a wall at its current position $y$ and computes how hard it pushes,
+and the membrane solver receives that force and computes how far it sinks.</p>
+
+<pre><code class="language-js">// Solver 1, the rod: given where the membrane surface is, how hard do I push?
+function rodGivenPosition(d, y) { return k1 * (d - y); }
+// Solver 2, the membrane: given a force, how far do I sink?
+function membraneGivenForce(f) { return f / k2; }</code></pre>
+
+<p>Run the toy below. The hand moves slowly in and out, and the plot shows the interface force against the exact
+$f^*$. With the default stiffnesses ($k_1 = 50$ N/m, $k_2 = 100$ N/m) the red curve sits on the grey one. Now drag
+$k_1$ above $k_2$.</p>
+
+<div class="demo" data-src="19-coupling/toy.js" data-height="460"
+     data-caption="Two springs, two solvers. The red interface force should follow the grey exact force f* = k<sub>1</sub>k<sub>2</sub>d/(k<sub>1</sub>+k<sub>2</sub>)."></div>
+
+<h2>Explicit lag, and why it diverges</h2>
+
+<p>The scheme in the demo is the simplest partitioned scheme there is. Each step, the rod solver uses the membrane
+position from the end of the previous step, then the membrane solver uses the force the rod just computed:</p>
+
+$$f_{n+1} = k_1 (d - y_n), \qquad y_{n+1} = \frac{f_{n+1}}{k_2}.$$
+
+<p>This is called <b>explicit coupling</b> or <b>explicit lag</b>, because one of the two solvers always works with a
+value that is one step out of date. (Running both solvers in parallel, each with the other's old value, is the same
+idea and no better.) To see whether it settles on $f^*$, follow the error $e_n = f_n - f^*$. Substitute $y_n = f_n /
+k_2$ into the first equation and subtract $f^* = k_1(d - f^*/k_2)$:</p>
+
+$$e_{n+1} = -\frac{k_1}{k_2}\, e_n.$$
+
+<p>Every exchange multiplies the error by $-k_1/k_2$. If the rod is softer than the membrane, the error shrinks
+geometrically, flipping sign each step. If the rod is stiffer, it grows geometrically: with $k_1 = 150$ N/m and $k_2 =
+100$ N/m, every step multiplies the error by $-1.5$, and after one second at 60 steps per second by $1.5^{60} \approx 3.7
+\times 10^{10}$. The demo prints the predicted and the measured factor per pass, and they agree to the last digit,
+because the toy is exactly linear.</p>
+
+<p>The physical picture is worth keeping. The rod solver believes the membrane is a rigid wall at its old position. A
+stiff rod pressed into a rigid wall produces a huge force. The membrane receives that huge force and sinks far too much.
+Next step the rod sees the membrane far below, barely touches it, and produces almost no force, so the membrane springs
+back up past where it should be. That is <b>chatter</b>, and when $k_1 &gt; k_2$ each swing is bigger than the
+last.</p>
+
+<h3>Swapping the roles</h3>
+
+<p>Now give each solver the other job: the rod receives the force and works out where its tip ends up, and the membrane
+receives that position and works out the force needed to hold its surface there:</p>
+
+$$x_{n+1} = d - \frac{f_n}{k_1}, \qquad f_{n+1} = k_2\, x_{n+1} \quad\Longrightarrow\quad e_{n+1} = -\frac{k_2}{k_1}\, e_n.$$
+
+<p>The factor is inverted. With a rod ten times stiffer than the membrane, the error now shrinks tenfold per exchange
+instead of growing tenfold. Choose <i>swapped roles</i> in the toy and push $k_1$ to its maximum to see it.</p>
+
+<div class="note">
+<p><b>The rule of thumb:</b> the factor per exchange is the compliance of the side that receives the force divided by
+the compliance of the side that receives the position. So give the force to the stiff side (it barely moves under any
+force) and the position to the soft side (it barely pushes back against any position). The natural contact
+formulation, where the stiff body treats the soft one as a wall, is exactly the wrong way round.</p>
+</div>
+
+<p>Swapping is not always possible. In a contact, the body that detects the penetration usually resolves it, and the
+soft side may be a solver you cannot change. And when inertia enters, the dynamic compliances replace the static ones,
+which can flip the ratio again. That case has a famous name in fluid-structure interaction: the <b>added-mass
+instability</b>, where a light structure coupled explicitly to a heavy fluid diverges no matter how small the time step,
+because the fluid's effective mass, not its stiffness, sets the ratio. You will meet a version of it in the main demo.</p>
+
+<h2>Fixed-point iteration between solvers</h2>
+
+<p>If one exchange per step is not enough, do several. Within one step, alternate the two solvers with the same $d$
+until the force stops changing:</p>
+
+<pre><code class="language-js">for (let k = 0; k &lt; passes; k++) {
+  f = rodGivenPosition(d, y);     // solver 1 with the latest position
+  y = membraneGivenForce(f);      // solver 2 with the latest force
+}</code></pre>
+
+<p>This is a <b>fixed-point iteration</b>, also called block Gauss-Seidel: each solver is one "block", and each block
+uses the newest values of the other. It is the coupling equivalent of the Gauss-Seidel iteration from the
+<a href="10-linear-solvers.html">solvers chapter</a>, with the same kind of convergence factor. Here the error after
+each pass is multiplied by the same $-k_1/k_2$ as before, so more passes help only when the scheme already
+converges. When it diverges, more passes diverge faster. Fixed-point iteration does not fix a bad ratio; it only
+removes the time lag.</p>
+
+<p>It does give you one measurable quantity: the change in the interface force from one pass to the next. If that
+change does not shrink, the coupling has not converged, whatever the picture looks like. Every partitioned code should
+print it.</p>
+
+<h2>Under-relaxation</h2>
+
+<p>The classic fix is to not trust the new force completely. Blend it with the old one, using a relaxation factor
+$\theta$ between 0 and 1:</p>
+
+$$f^{k+1} = (1 - \theta)\, f^k + \theta\, k_1 (d - y^k).$$
+
+<p>Write $r = k_1/k_2$. The error now evolves as $e^{k+1} = \big(1 - \theta(1 + r)\big)\, e^k$, so the iteration
+converges when</p>
+
+$$\big|1 - \theta (1 + r)\big| &lt; 1 \quad\Longleftrightarrow\quad 0 &lt; \theta &lt; \frac{2}{1 + r}.$$
+
+<p>Any ratio can be tamed by a small enough $\theta$. With $r = 10$ you need $\theta &lt; 2/11 \approx 0.18$, and the
+best choice, $\theta = 1/(1 + r) \approx 0.091$, makes the factor exactly zero: the iteration lands on $f^*$ in one
+pass. But look at what that best choice needs: the stiffness ratio. If you knew how soft the other side is, you could do
+better than blending. That is the next idea. (Practical codes estimate $\theta$ on the fly from the last two
+corrections, a method called Aitken relaxation; it is a secant method on the interface.)</p>
+
+<h2>The compliance of the soft side</h2>
+
+<p>The rod solver failed because it treated the membrane as a rigid wall. The fix is to tell it the truth: the wall
+gives. For a linear soft body, how much it gives is captured by one matrix. Push node $j$ with a unit force, hold
+everything else free, and measure how far every node $i$ moves. That displacement is $W_{ij}$, the <b>compliance</b>
+of the soft body (also called its <b>Green's function</b> or influence matrix), in metres per newton. A force pattern
+$f$ moves the nodes by</p>
+
+$$u = W f, \qquad W = K^{-1},$$
+
+<p>where $K$ is the soft body's stiffness matrix. You never invert $K$. You need $W$ only at the contact nodes, and
+each column is one solve with a unit force on the right-hand side, which a tridiagonal or sparse solver does in
+microseconds. $W$ is symmetric (the displacement at $i$ from a push at $j$ equals the displacement at $j$ from a push at
+$i$, a fact engineers call Maxwell-Betti reciprocity) and positive definite.</p>
+
+<p>Inside a time step, the right $K$ is the one the soft solver actually solves. For implicit Euler (or converged
+XPBD) with node mass $m$ that is $K + M/h^2$: inertia makes a body stiffer over a short step, because it cannot get out
+of the way in time. In the main demo below, each membrane node has mass 0.01 kg, a mattress spring of 20 N/m to its
+rest position and a cover spring of 1000 N/m to each neighbour, and $h = 1/120$ s, so the diagonal of the step matrix
+is $144 + 20 + 2\times 1000 = 2164$ N/m. Solving for the middle column gives a one-step compliance of 1.21 mm/N under
+the foot, against a static 3.50 mm/N.</p>
+
+<pre><code class="language-js">// One column of W: push contact node k with 1 N, solve, read the displacement at every contact node.
+for (let k = 0; k &lt; nC; k++) {
+  const rhs = new Float64Array(N - 2);
+  rhs[contacts[k] - 1] = 1;
+  const u = solveTridiag(memDiag, kc, rhs);       // the membrane's own step matrix
+  for (let j = 0; j &lt; nC; j++) W[j][k] = u[contacts[j] - 1];
+}</code></pre>
+
+<h2>Compliance-augmented contact</h2>
+
+<p>Give the rod solver a model of the membrane: if the membrane currently feels a force $f^k$ and sits at $y^k$, then
+under a different force $f$ it will sit at about</p>
+
+$$y(f) \approx y^k + \hat W\,(f - f^k),$$
+
+<p>where $\hat W$ is the rod solver's estimate of the membrane's compliance. The rod solver now solves its contact
+against this moving wall instead of a fixed one. In the toy, $f = k_1\big(d - y^k - \hat W (f - f^k)\big)$ has the
+solution $f^{k+1} = k_1 (d - y^k + \hat W f^k) / (1 + k_1 \hat W)$, and the error factor becomes</p>
+
+$$\frac{e^{k+1}}{e^k} = \frac{k_1\,(\hat W - W)}{1 + k_1 \hat W}, \qquad W = \frac{1}{k_2}.$$
+
+<p>Three facts follow. With $\hat W = W$ the factor is zero: one pass gives the exact answer, whatever the stiffness
+ratio. With $\hat W = 0$ it is $-k_1/k_2$, the explicit lag we started from. And overestimating is safe: for any $\hat W
+\ge W$ the factor lies between 0 and 1, so the iteration converges monotonically, only more slowly. Underestimating is
+not: the factor reaches $-1$ when $\hat W = (W - 1/k_1)/2$. With $k_1 = 1000$ N/m and $k_2 = 100$ N/m that is 45% of the
+true compliance; at 40% the toy diverges with a factor of $-1.2$, at 50% it converges with $-0.83$. Try the slider
+<i>compliance estimate / true</i>.</p>
+
+<p>In a position-based rod solver, "solve the contact against a wall that gives by $D$ metres per newton" is one line
+you already know: an XPBD constraint with compliance $\alpha = D$. The contact constraint $C = y_\text{foot} -
+\text{level}$ uses as its level the membrane position with the current force removed, $y^k + D f^k$, and with
+compliance $\alpha$ XPBD converges to $C = -\alpha f$, which is exactly the foot sitting on the predicted membrane
+surface:</p>
+
+<pre><code class="language-js">// Inside the rod's Gauss-Seidel loop, for each contact j (foot above the membrane node c):
+const level = memY[c] + D[j] * fNow[j];      // where the membrane would sit with no contact force
+const at = D[j] / (h * h);                    // XPBD time-scaled compliance, alpha = D[j]
+const C = yFoot - level;
+let dl = (-C - at * lam[j]) / (wFoot + at);
+if (lam[j] + dl &lt; 0) dl = -lam[j];           // contacts only push
+lam[j] += dl;
+yFoot += wFoot * dl;
+// after the loop: f[j] = lam[j] / (h * h), which the membrane solver then receives</code></pre>
+
+<div class="note">
+<p><b>The compliance changes the path, not the destination.</b> When the iteration converges, the force stops
+changing, so $f = f^k$ and the correction $D(f - f^k)$ vanishes. The final contact condition is then exactly "the foot
+sits on the membrane", whatever value of $D$ you used. A wrong $D$ costs iterations or stability, never accuracy. This
+is what makes the trick so useful: you can use a crude, cheap, conservative estimate of the soft side's compliance.</p>
+</div>
+
+<h2>Several contacts: the off-diagonal terms</h2>
+
+<p>A flat foot touches the membrane at several nodes, and the membrane does not respond to each contact separately.
+Push under one node and its neighbours sink too: $W$ has large off-diagonal entries. If each contact uses only its
+own diagonal entry, $D_{jj} = W_{jj}$, it ignores the sinking caused by its neighbours' forces, which is exactly the
+mistake of the rigid wall, made a little smaller.</p>
+
+<p>Make it precise. Take the rod as rigid (the foot is held at a fixed depth) and let $d$ be the vector of
+penetrations of the foot into the unloaded membrane. The exact contact forces solve $W f = d$. One pass of
+compliance-augmented coupling computes, for each contact,</p>
+
+$$f^{k+1} = f^k + D^{-1}\,(d - W f^k) \quad\Longrightarrow\quad e^{k+1} = \big(I - D^{-1} W\big)\, e^k.$$
+
+<p>With $D$ the diagonal of $W$, this is Jacobi iteration on $W$, and it converges if and only if the spectral radius
+$\rho(I - D^{-1}W)$, the largest eigenvalue magnitude, is below 1. Here are the numbers for the demo's membrane, at
+three neighbouring nodes under the foot (one-step compliances, mm/N):</p>
+
+$$W = \begin{pmatrix} 1.21 & 0.81 & 0.54 \\ 0.81 & 1.21 & 0.81 \\ 0.54 & 0.81 & 1.21 \end{pmatrix}.$$
+
+<p><b>Two contacts</b> (the top-left 2&times;2 block). With the diagonal, $I - D^{-1}W$ has eigenvalues $\pm 0.81/1.21$,
+so $\rho = 0.669$: it converges, with the error flipping sign every pass. For any two contacts the diagonal is safe,
+because $\rho = |W_{12}|/\sqrt{W_{11}W_{22}} &lt; 1$ follows from $W$ being positive definite. It approaches 1 as the
+two contacts approach the same node.</p>
+
+<p><b>Three contacts.</b> The eigenvalues of $W$ are 2.66, 0.67 and 0.30 mm/N. The largest belongs to the mode where
+all three contacts push down together, and the membrane gives much more under that combined push than any single
+diagonal entry admits: $1 - 2.66/1.21 = -1.20$. So $\rho = 1.20$ and the diagonal version <i>diverges</i>, even though
+every contact on its own is modelled correctly.</p>
+
+<p>The repair is to put the <b>row sum</b> on the diagonal instead, the Gershgorin bound:</p>
+
+$$D_{jj} = \sum_k |W_{jk}|.$$
+
+<p>For the three contacts that gives $D = \operatorname{diag}(2.56, 2.83, 2.56)$ mm/N and $\rho = 0.889$. It
+converges. And it always will, for any number of contacts and any positive definite $W$. The matrix $D - W$ has
+non-negative diagonal entries $\sum_{k \ne j}|W_{jk}|$ that are at least the sum of the magnitudes of its off-diagonal
+entries in that row, so by the Gershgorin circle theorem all its eigenvalues are non-negative: $D \succeq W$. If $e$ is an eigenvector
+of $D^{-1}W$ with eigenvalue $\mu$, then $We = \mu De$ and $\mu = e^\top W e / e^\top D e$, which lies in $(0, 1]$
+because $0 &lt; e^\top W e \le e^\top D e$. So the eigenvalues of $I - D^{-1}W$ lie in $[0, 1)$. No negative eigenvalues means no flip-flop, and none at or above 1 means no divergence. If the rod is not
+rigid, its own compliance $S$ joins $D$ in the denominator, and the factor only gets smaller.</p>
+
+<div class="warning">
+<p><b>The diagonal is not just slow, it is wrong-way-round in disguise.</b> The general condition for this kind of
+splitting to converge is that $2D - W$ be positive definite. For the three-contact example, $2D - W$ with the diagonal
+has an eigenvalue of $-0.24$; with the row sums its smallest is $+2.64$. With two contacts the diagonal satisfies the
+condition automatically, which is why the bug often hides until a third contact appears. The price of safety is speed:
+for two contacts the row sum gives $\rho = 2 \times 0.81 / (1.21 + 0.81) = 0.802$, slower than the diagonal's 0.669.
+</p>
+</div>
+
+<h2>The main demo</h2>
+
+<p>Now the real thing. A stiff rod (nine particles, links of $10^5$ N/m, solved by XPBD with 300 Gauss-Seidel
+iterations per pass, standing in for a direct solver) is lowered by a hand onto a soft membrane (41 particles, solved by
+its own 30 Gauss-Seidel sweeps of its implicit-Euler system). Both bodies move only vertically, so the physics is the
+toy's, with a real membrane. The two solvers exchange only the contact forces and the membrane's positions. The faint
+dashed line and the grey plot curve are a monolithic copy of the same scene running alongside, one solver for
+everything. After the foot settles, the monolithic force matches the static prediction $F = d / (S + W_\text{foot})$
+for a push of $d = 4$ cm, where $S$ is the rod's static compliance and $W_\text{foot} = 1/(\mathbf 1^\top W^{-1}
+\mathbf 1)$ the static compliance the membrane presents to a rigid flat foot: 12.72 N for three contacts.</p>
+
+<div class="demo" data-src="19-coupling/solution.js" data-height="520"
+     data-caption="A stiff rod pressed into a soft membrane, solved by two solvers. Red: this scheme's foot force; grey: the monolithic reference."></div>
+
+<p>Things to try:</p>
+<ol>
+<li><b>Explicit lag</b> and <b>fixed-point</b>. With one contact the readout predicts a factor of about 18 per pass:
+the membrane's one-step compliance under the foot (1.21 mm/N) over the rod foot's (0.068 mm/N). Fixed-point iteration flips between
+"huge force" and "no force" every pass. With an odd number of passes each step ends on a huge kick and the scene
+explodes; with an even number it ends on "no force" and the foot sinks silently through the membrane. Both are the same
+divergence.</li>
+<li><b>Soften the rod</b> to 100 N/m with explicit lag and one contact. The factor drops to about 0.98 and never much lower: a 50 g
+foot cannot move more than $h^2/m = 1.39$ mm per newton in one step, however soft the rod. That is the added-mass
+effect: the inertia of the light side, not its stiffness, keeps the ratio near 1.</li>
+<li><b>Relaxed fixed-point</b> with one contact. With $\theta = 0.05$ the force settles within 0.3% of the
+reference (the remaining gap is the rod's own unconverged iterations). At $\theta = 0.1$ it still settles; at 0.12 it
+chatters, as $\theta &lt; 2/(1 + r) = 0.106$ predicts.</li>
+<li><b>Swapped roles.</b> The membrane solver handles the contact (the foot is a rigid ceiling for it) and the rod
+receives the force. It converges on the reference, as the rule of thumb says.</li>
+<li><b>Compliance: diagonal</b> with 1 or 2 contacts converges; with 3 or 5 it does not. The readout includes the rod's
+own small give, so it predicts 1.02 for three contacts rather than the rigid 1.20, and 1.53 for five. Watch the
+<i>interface change</i> readout: it never decays. With three contacts and five passes the total force jumps between
+about 9 and 18 N. Set an even number of passes and it settles at 11.46 N instead of 12.72 N, with the middle contact
+carrying nothing: a wrong answer that looks calm. Only the interface change gives it away.</li>
+<li><b>Compliance: Gershgorin</b> converges on the monolithic answer for every foot width. Now drop the membrane sweeps
+from 30 to 8 and try the diagonal again: it converges. Too few sweeps leave the membrane under-converged, so it
+responds to each new force only partly, which acts as hidden under-relaxation. Improve the membrane solver and the
+coupling breaks: a real bug pattern.</li>
+</ol>
+
+<h2>Your turn</h2>
+
+<div class="exercise">
+<h4>make the stiff solver know the wall gives</h4>
+<p>Open the starter (<a href="../code/run.html?src=19-coupling/starter.js" target="_blank">run it</a>,
+<a href="../code/19-coupling/starter.js" target="_blank">read it</a>). Its default scheme is
+<i>compliance: Gershgorin</i>, and it explodes, because both compliance schemes still behave like plain fixed-point
+iteration. Fill in the two TODOs:</p>
+<ol>
+<li><code>contactCompliance</code>: return $D_{jj} = W_{jj}$ for the diagonal scheme and $D_{jj} = \sum_k
+|W_{jk}|$ for the Gershgorin scheme. The matrix <code>W</code> is already computed for you at the contact nodes.</li>
+<li>The contact inside <code>solveRod</code>: shift the obstacle level to the unloaded membrane position and give the
+constraint XPBD compliance $\alpha = D_{jj}$.</li>
+</ol>
+<p>When it works, the Gershgorin scheme's red force curve lies on the grey monolithic one and the static prediction
+readout agrees with both.</p>
+</div>
+
+<details class="hint"><summary>Hint: which force goes into the level?</summary>
+<p><code>fNow[j]</code> is the force the membrane is currently feeling, the one that put it at <code>memY</code>.
+Adding <code>D[j] * fNow[j]</code> undoes its effect, giving the level the membrane would have with no contact force.
+XPBD then pulls the foot down by $\alpha f$ below that level, which is where the membrane will be under the new
+force.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Compare with <a href="../code/19-coupling/solution.js" target="_blank">solution.js</a>:</p>
+<pre><code class="language-js">function contactCompliance(W, modeName) {
+  const nC = W.length, D = new Float64Array(nC);
+  if (modeName === 'compliance: diagonal') {
+    for (let j = 0; j &lt; nC; j++) D[j] = W[j][j];
+  } else if (modeName === 'compliance: Gershgorin') {
+    for (let j = 0; j &lt; nC; j++) {
+      let s = 0;
+      for (let k = 0; k &lt; nC; k++) s += Math.abs(W[j][k]);
+      D[j] = s;
+    }
+  }
+  return D;
+}
+
+// in solveRod, for each contact j:
+const level = w.memY[contacts[j]] + D[j] * fNow[j];
+const at = D[j] / (h * h);</code></pre>
+</details>
+
+<div class="exercise">
+<h4>predict the divergence</h4>
+<p>Open the <a href="../code/run.html?src=19-coupling/toy.js" target="_blank">toy</a> and keep $k_2 = 100$ N/m. On
+paper, before touching any slider, predict:</p>
+<ol>
+<li>the rod stiffness $k_1$ at which explicit lag starts to diverge;</li>
+<li>the same for relaxed fixed-point with $\theta = 0.5$;</li>
+<li>with compliance-augmented coupling and $k_1 = 1000$ N/m, the smallest <i>compliance estimate / true</i> ratio that
+still converges.</li>
+</ol>
+<p>Then check each with the sliders and the measured factor readout. Finally, set $k_1 = 1000$ N/m and find the
+relaxation $\theta$ that converges in a single pass.</p>
+</div>
+
+<details class="hint"><summary>Hint</summary>
+<p>Set each factor to $-1$. Explicit lag: $-k_1/k_2 = -1$. Relaxed: $1 - \theta(1 + r) = -1$, so $r = 2/\theta - 1$.
+Compliance: $k_1(\hat W - W) = -(1 + k_1 \hat W)$, so $\hat W = (W - 1/k_1)/2$. You should find 100 N/m, 300 N/m and
+0.45; the single-pass relaxation is $\theta = 1/(1 + r) = 1/11$.</p>
+</details>
+
+<div class="exercise">
+<h4>diagonal against Gershgorin</h4>
+<p>Using the three-contact matrix $W$ from this chapter, compute by hand (or with a few lines of code) the spectral
+radius of $I - D^{-1}W$ for the two-contact block and for all three contacts, once with $D$ the diagonal and once with
+the row sums. Then verify the three-contact case in the demo: choose 3 contacts, set the rod stiffness to its maximum
+($10^7$ N/m, so the rod is nearly rigid) and read the predicted factor for both schemes. Why is the demo's number at the
+default stiffness ($10^5$ N/m) smaller for the diagonal scheme?</p>
+</div>
+
+<details class="hint"><summary>Hint: eigenvalues without a library</summary>
+<p>For the symmetric 3&times;3 with equal diagonal $a$, the vector $(1, 0, -1)$ is an eigenvector of $W$ with eigenvalue
+$a - W_{13}$. The other two lie in the span of $(1, 0, 1)$ and $(0, 1, 0)$, which reduces the problem to a 2&times;2.
+With the row sums, $D^{-1}W$ is not symmetric, but $D^{-1/2}WD^{-1/2}$ is and has the same eigenvalues.</p>
+</details>
+
+<details class="hint"><summary>Solution</summary>
+<p>Two contacts: diagonal $\rho = 0.669$, Gershgorin $\rho = 0.802$. Three contacts: diagonal $\rho = 1.196$ (it
+diverges), Gershgorin $\rho = 0.889$. With a nearly rigid rod the demo predicts 1.196 and 0.889 too. At the default
+stiffness the rod foot gives by 0.068 mm/N per step, and that compliance $S$ joins $D$ in $(S + D)^{-1}(D - W)$: it
+damps the mode where all contacts push together, which is the diverging one, and brings the diagonal scheme down to
+1.02. It still diverges, just more slowly. The rod's own give helps the Gershgorin scheme only slightly (its
+all-together mode already converges in one pass).</p>
+</details>
+
+<h2>Summary</h2>
+<ul>
+<li><b>Monolithic</b> coupling solves everything in one system: robust, and the reference. <b>Partitioned</b> coupling
+keeps one solver per body and exchanges interface forces and positions: flexible, and a numerical method in its own
+right.</li>
+<li>With <b>explicit lag</b> or <b>fixed-point</b> iteration, the interface error is multiplied each exchange by the
+compliance of the force-receiving side over the compliance of the position-receiving side: $-k_1/k_2$ in the toy. Give
+the force to the stiff side.</li>
+<li><b>Under-relaxation</b> by $\theta$ converges for $\theta &lt; 2/(1 + r)$; the best $\theta$ needs the stiffness
+ratio.</li>
+<li>The soft side's <b>compliance</b> $W$ (its Green's function at the contacts, including inertia over a step) can be
+put into the stiff side's contact as an XPBD compliance $\alpha = D$. Overestimating is safe, and the converged answer
+does not depend on $D$.</li>
+<li>With several contacts on the same soft body, use the <b>row sums</b> $D_{jj} = \sum_k|W_{jk}|$: then $D \succeq W$ and
+convergence is guaranteed. The diagonal alone can diverge from three contacts on.</li>
+</ul>
+
+<h3>Questions to come back to</h3>
+<p>Try these from memory in a few days.</p>
+<ol>
+<li>Why does a stiff body treating a soft body as a rigid wall make explicit coupling diverge? Describe it without
+equations.</li>
+<li>A rod of 2000 N/m rests on a mattress of 500 N/m with explicit lag. What is the error factor per exchange, and what
+is the largest relaxation $\theta$ that still converges?</li>
+<li>Your compliance-augmented coupling uses a compliance estimate that is twice the true value. Is the final answer
+wrong? Is the iteration slower or faster than with the exact value?</li>
+<li>Why can using only the diagonal of $W$ work with two contacts and fail with three?</li>
+</ol>
+</article>
+</main>
+</body>
+</html>

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page moved · Learn Physics Simulation</title>
+<script>
+  // Chapters were renumbered when "Springs and Hooke's Law" became chapter 03.
+  // Old addresses (chapters/NN-slug.html, code/NN-slug/...) are sent to the new number.
+  (function () {
+    var p = location.pathname, m = p.match(/\/(chapters|code)\/(\d\d)-([a-z0-9-]+)(.*)$/);
+    if (!m) return;
+    var moved = ['03-time-integration', '04-springs-damping', '05-constraints', '06-pbd', '07-xpbd', '08-substepping', '09-linear-solvers', '10-rotations', '11-beams', '12-cosserat-rods', '13-tendons', '14-collision-detection', '15-contact-friction', '16-cloth-shells', '17-pressure', '18-coupling', '19-active-materials', '20-deformation', '21-hyperelasticity', '22-pic-flip', '23-apic', '24-mpm', '25-plasticity', '26-implicit-mpm', '27-pbmpm', '28-reading-apic', '29-reading-mpm-course', '30-reading-pbmpm', '31-stability', '32-verification'];
+    if (moved.indexOf(m[2] + '-' + m[3]) < 0) return;
+    var n = parseInt(m[2], 10);
+    var next = (n + 1 < 10 ? '0' : '') + (n + 1) + '-' + m[3];
+    location.replace(p.slice(0, p.length - m[0].length) + '/' + m[1] + '/' + next + m[4] + location.search + location.hash);
+  })();
+</script>
+<link rel="stylesheet" href="/learn-physics-sim/assets/style.css">
+</head>
+<body>
+<main style="margin-left:0"><article>
+<h1>Page not found</h1>
+<p>This page does not exist (any more). Start from the <a href="/learn-physics-sim/">contents</a>.</p>
+</article></main>
+</body>
+</html>
