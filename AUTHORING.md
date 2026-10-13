@@ -62,6 +62,37 @@ Length: 2,500-4,500 words of prose per chapter (the reading chapters may be long
 `$$...$$` display. Inside HTML, escape `<` and `&` in text (`&lt;`, `&amp;`), and avoid a literal `$` other than as a
 maths delimiter.
 
+## 4b. Presenting maths
+
+Every formula must be followable by a reader who meets it for the first time. These rules come from the learning
+research on worked examples, cognitive load and multiple representations; `chapters/03-time-integration.html` is the
+reference implementation.
+
+1. **Notation before formulas (pre-training).** Introduce the symbols on their own, before the first equation that
+   combines them: a short "the notation" section with a picture where possible (a timeline, a diagram) and a table of
+   symbol, how to read it, units. Never introduce a symbol and use it in a complicated expression in the same sentence.
+2. **One idea at a time, then combine (isolated, then interacting elements).** Show each piece separately before the
+   formula that uses them together.
+3. **Numbers before symbols.** Work a concrete example with easy numbers (k = 1, m = 1, h = 0.5) that the reader can
+   check on a calculator before, or right next to, the general algebra. Use a table when several methods are compared.
+4. **Compare methods side by side, not one after another.** When a chapter has alternatives (explicit/symplectic/
+   implicit, PIC/FLIP/APIC, Jacobi/Gauss-Seidel), put them in one table, aligned so the single difference is obvious.
+5. **Label terms where they are, not in a paragraph below (no split attention).** Use `\underbrace{...}_{\text{...}}`
+   for the meaning of a term, and for multi-step derivations an `aligned` block with a short justification per line
+   (`&& \text{multiply out the bracket}`). Every line does one thing.
+6. **Colour roles, consistently, never alone.** `\now{...}` (blue) is known at the start of a step, `\nxt{...}`
+   (orange) is new, computed by the step; in prose use `<span class="now">` / `<span class="nxt">`. Introduce the
+   meaning with words and a legend; colour is a second cue, never the only one.
+7. **Show every algebra step a reader would have to do on paper.** "It can be shown" is not allowed for anything the
+   chapter relies on. Optional derivations go in `<details class="deeper">` ("Going deeper"), which keeps the depth
+   without blocking the main path.
+8. **A picture for every key result.** Prefer a demo or figure that makes the result visible (phase space for
+   integrators, a spectral radius as a shrinking error) and point the prose at what to look for.
+9. **Prediction first, check often.** Open with a guess the reader commits to, and close the loop later. After each
+   major idea add a short `<div class="check">` question with a collapsible answer.
+10. **Several routes to hard results.** If the standard proof needs tools the reader may lack (eigenvalues), give an
+    elementary route first (expand and cancel; a discriminant) and the standard route as "Going deeper".
+
 ## 5. Code
 
 Every chapter with an exercise has `code/<id>/starter.js` and `code/<id>/solution.js`; a chapter may add other demo
@@ -77,7 +108,7 @@ global `Sim`. It runs at `code/run.html?src=<id>/<file>.js`.
 - SI units in the code (metres, kilograms, seconds). Gravity 9.81 m/s^2 downward (y is up in the sandbox).
 - Deterministic: use `Sim.random(seed)` instead of `Math.random()`.
 - Performance: the demo should run at 60 fps on a laptop. For particles in the thousands use flat `Float64Array`s
-  and `g.points(...)`. Keep MPM grids around 64-128 cells across and particle counts to a few thousand.
+  and `g.points(...)`. Keep MPM grids around 63-128 cells across and particle counts to a few thousand.
 
 ### Sandbox API (`code/lib/sandbox.js`)
 
