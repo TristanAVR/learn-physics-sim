@@ -399,6 +399,85 @@ different proofs, the same limit.</p>
 <p>Back to the guess you made at the start. The "simplest possible code" was explicit Euler: the swing grows, every
 time, at any time step.</p>
 
+<h2>Puzzles</h2>
+
+<p>Real situations where the ideas of this chapter decide what happens. Work them out first, then check. Answers within
+2 % count.</p>
+
+<div class="puzzle" id="bead" data-choices="It is stable|It explodes" data-answer="It explodes">
+<h4>the bug report</h4>
+<p>A game shows a 50 g bead on a spring of $k = 2000$ N/m, stepped with symplectic Euler once per frame at 60 frames
+per second. A player reports that the bead flies off the screen. Before opening the code: is that what you would
+expect?</p>
+<details class="hint"><summary>Hint 1</summary><p>Compute $\omega = \sqrt{k/m}$ with $m$ in kilograms.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>The step is $h = 1/60$ s. Compare $h\omega$ with 2.</p></details>
+<div class="worked"><p>$\omega = \sqrt{2000/0.05} = 200$ rad/s and $h\omega = 200/60 = 3.33 &gt; 2$: past symplectic
+Euler's limit, so it explodes. The bug report is the integrator, not the spring.</p></div>
+</div>
+
+<div class="puzzle" id="substeps" data-answer="2" data-tol="0" data-unit="substeps per frame">
+<h4>the fix</h4>
+<p>Same bead. You keep 60 frames per second but split each frame into $n$ equal substeps. What is the smallest whole
+number $n$ that makes symplectic Euler stable?</p>
+<details class="hint"><summary>Hint</summary><p>Each substep is $h = 1/(60n)$. You need $h\omega &lt; 2$.</p></details>
+<div class="worked"><p>$\omega/(60n) &lt; 2$ means $n &gt; 200/120 = 1.67$, so $n = 2$ ($h\omega = 1.67$). In practice
+you would take a few more for accuracy, since $h\omega$ close to 2 is stable but badly wrong.</p></div>
+</div>
+
+<div class="puzzle" id="explicit-second" data-answer="5.18" data-tol="0.02" data-unit="&times; the starting energy">
+<h4>one second of explicit Euler</h4>
+<p>A mass on a spring with $\omega = 10$ rad/s is stepped with explicit Euler at 60 steps per second. After exactly one
+second, how many times its starting energy does it have?</p>
+<details class="hint"><summary>Hint 1</summary><p>Each step multiplies the energy by $1 + h^2\omega^2$.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>$h\omega = 10/60$, and one second is 60 steps, so the factor is
+$(1 + h^2\omega^2)^{60}$.</p></details>
+<div class="worked"><p>$(1 + 0.1667^2)^{60} = 1.02778^{60} = 5.18$. In one second the spring has five times the energy
+it started with; in three seconds, about 140 times.</p></div>
+</div>
+
+<div class="puzzle" id="clock-implicit" data-answer="67.4" data-tol="0.02" data-unit="% of the energy left">
+<h4>the clock that stops</h4>
+<p>A pendulum clock is simulated as a spring with a 1 s period ($\omega = 2\pi$ rad/s), using implicit Euler with
+$h = 0.01$ s because "implicit is stable". After one second of simulated time, what percentage of the pendulum's
+energy is left?</p>
+<details class="hint"><summary>Hint 1</summary><p>Implicit Euler divides the energy by $1 + h^2\omega^2$ every step.</p></details>
+<details class="hint"><summary>Hint 2</summary><p>One second is 100 steps: $\left(1/(1 + h^2\omega^2)\right)^{100}$.</p></details>
+<div class="worked"><p>$h^2\omega^2 = (0.01 \times 6.283)^2 = 0.00395$, and $1/1.00395^{100} = 0.674$: only 67 % is
+left after one second, and less than 2 % after ten. Stable is not the same as right: for a clock, symplectic Euler is
+the better choice.</p></div>
+</div>
+
+<div class="puzzle" id="which" data-choices="Explicit Euler|Symplectic Euler|Implicit Euler" data-answer="Explicit Euler">
+<h4>which integrator was it?</h4>
+<p>A log file from a spring simulation ($a = -x$, $h = 0.5$ s) shows the first three states:
+$(x, v) = (1, 0)$, then $(1, -0.5)$, then $(0.75, -1)$. Which integrator produced it?</p>
+<details class="hint"><summary>Hint</summary><p>Look at the first step: the velocity changed, but did the position?
+Which method moves with the old velocity?</p></details>
+<div class="worked"><p>Explicit Euler: in the first step the position used the starting velocity, 0, so $x$ stayed at
+1. These are the numbers from the hand calculation earlier in the chapter.</p></div>
+</div>
+
+<div class="puzzle" id="framedrop" data-answer="66.7" data-tol="0.02" data-unit="ms">
+<h4>the frame-rate drop</h4>
+<p>A program steps a spring with $\omega = 30$ rad/s using symplectic Euler, passing the measured frame time straight
+in as $h$. What is the longest frame, in milliseconds, it can survive without the spring exploding?</p>
+<details class="hint"><summary>Hint</summary><p>The limit is $h\omega = 2$.</p></details>
+<div class="worked"><p>$h = 2/30 = 0.0667$ s $= 66.7$ ms. A single hitch longer than that, a loading screen or a
+breakpoint, and the spring explodes. With a fixed time step (and several steps for a long frame) it never sees the
+hitch.</p></div>
+</div>
+
+<div class="check">
+<h4>mixed: spring or integrator?</h4>
+<p>For each symptom, is the cause the physics of the spring (chapter 03) or the integrator (this chapter)? (a) The
+crate bounces three times a second instead of once. (b) The crate bounces higher every time. (c) The crate's bounce
+slowly dies out although there is no damping. (d) Doubling the crate's mass makes it bounce slower.</p>
+<details><summary>Answer</summary>
+<p>(a) Physics: the period is $2\pi\sqrt{m/k}$; check $k$ and $m$. (b) Integrator: explicit Euler, or $h\omega$ too
+large. (c) Integrator: implicit Euler's numerical damping. (d) Physics, and correct: $T \propto \sqrt{m}$.</p>
+</details>
+</div>
+
 <h2>Your turn</h2>
 
 <div class="exercise">
