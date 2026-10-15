@@ -158,7 +158,51 @@ slope.</p>
 <p>Sometimes it is easier to think about how much a spring <i>gives</i> per newton than how much it resists per
 metre. That is the <b>compliance</b>, $1/k$, in metres per newton, so that $x = (1/k)\,F$. A perfectly rigid connection
 has compliance 0, which is why the <a href="08-xpbd.html">XPBD</a> chapter is written entirely in compliances. The two
-views make combining springs easy:</p>
+views make combining springs easy. Here is the same 10 N weight on one spring of 500 N/m, on two of them end to end,
+and on two side by side:</p>
+
+<figure>
+<svg viewBox="0 0 720 370" role="img" aria-label="The same 10 newton weight on one spring, two springs end to end, and two springs side by side. One spring of 500 newtons per metre stretches 2 centimetres. End to end, each spring carries the full 10 newtons and stretches 2 centimetres, 4 in total: the pair acts like 250 newtons per metre. Side by side, each carries 5 newtons and stretches 1 centimetre: the pair acts like 1000 newtons per metre.">
+<defs><marker id="cs-tick" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M5,0 L5,10" stroke="#d9473a" stroke-width="2"/></marker></defs>
+<rect x="40" y="36" width="160" height="8" fill="currentColor" opacity="0.25"/>
+<rect x="280" y="36" width="160" height="8" fill="currentColor" opacity="0.25"/>
+<rect x="520" y="36" width="160" height="8" fill="currentColor" opacity="0.25"/>
+<text x="120" y="22" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">one spring</text>
+<text x="360" y="22" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">end to end (series)</text>
+<text x="600" y="22" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">side by side (parallel)</text>
+<line x1="70" y1="124" x2="170" y2="124" stroke="currentColor" stroke-dasharray="4 4" opacity="0.45"/>
+<polyline points="120.0,44.0 120.0,52.0 129.0,57.5 111.0,63.0 129.0,68.5 111.0,74.0 129.0,79.5 111.0,85.0 129.0,90.5 111.0,96.0 129.0,101.5 111.0,107.0 129.0,112.5 111.0,118.0 129.0,123.5 111.0,129.0 129.0,134.5 120.0,140.0 120.0,148.0" fill="none" stroke="currentColor" stroke-width="2"/>
+<rect x="92" y="148" width="56" height="34" rx="4" fill="#2f6fdf"/><text x="120" y="170" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">10 N</text>
+<text x="104" y="99" fill="#7d4fc4" font-size="13" text-anchor="end">carries 10 N</text>
+<line x1="164" y1="124.0" x2="164" y2="148.0" stroke="#d9473a" stroke-width="2" marker-start="url(#cs-tick)" marker-end="url(#cs-tick)"/><text x="170" y="140.0" fill="#d9473a" font-size="13">2 cm</text>
+<line x1="310" y1="204" x2="410" y2="204" stroke="currentColor" stroke-dasharray="4 4" opacity="0.45"/>
+<polyline points="360.0,44.0 360.0,52.0 369.0,57.5 351.0,63.0 369.0,68.5 351.0,74.0 369.0,79.5 351.0,85.0 369.0,90.5 351.0,96.0 369.0,101.5 351.0,107.0 369.0,112.5 351.0,118.0 369.0,123.5 351.0,129.0 369.0,134.5 360.0,140.0 360.0,148.0" fill="none" stroke="currentColor" stroke-width="2"/>
+<circle cx="360" cy="148" r="4" fill="currentColor"/>
+<polyline points="360.0,148.0 360.0,156.0 369.0,161.5 351.0,167.0 369.0,172.5 351.0,178.0 369.0,183.5 351.0,189.0 369.0,194.5 351.0,200.0 369.0,205.5 351.0,211.0 369.0,216.5 351.0,222.0 369.0,227.5 351.0,233.0 369.0,238.5 360.0,244.0 360.0,252.0" fill="none" stroke="currentColor" stroke-width="2"/>
+<rect x="332" y="252" width="56" height="34" rx="4" fill="#2f6fdf"/><text x="360" y="274" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">10 N</text>
+<text x="344" y="99" fill="#7d4fc4" font-size="13" text-anchor="end">carries 10 N</text>
+<text x="344" y="203" fill="#7d4fc4" font-size="13" text-anchor="end">carries 10 N</text>
+<line x1="404" y1="204.0" x2="404" y2="252.0" stroke="#d9473a" stroke-width="2" marker-start="url(#cs-tick)" marker-end="url(#cs-tick)"/><text x="410" y="232.0" fill="#d9473a" font-size="13">4 cm in total</text>
+<text x="410" y="262" fill="#d9473a" font-size="12" opacity="0.85">(2 cm each)</text>
+<line x1="540" y1="124" x2="660" y2="124" stroke="currentColor" stroke-dasharray="4 4" opacity="0.45"/>
+<polyline points="570.0,44.0 570.0,52.0 579.0,56.8 561.0,61.5 579.0,66.2 561.0,71.0 579.0,75.8 561.0,80.5 579.0,85.2 561.0,90.0 579.0,94.8 561.0,99.5 579.0,104.2 561.0,109.0 579.0,113.8 561.0,118.5 579.0,123.2 570.0,128.0 570.0,136.0" fill="none" stroke="currentColor" stroke-width="2"/>
+<polyline points="630.0,44.0 630.0,52.0 639.0,56.8 621.0,61.5 639.0,66.2 621.0,71.0 639.0,75.8 621.0,80.5 639.0,85.2 621.0,90.0 639.0,94.8 621.0,99.5 639.0,104.2 621.0,109.0 639.0,113.8 621.0,118.5 639.0,123.2 630.0,128.0 630.0,136.0" fill="none" stroke="currentColor" stroke-width="2"/>
+<rect x="560" y="136" width="80" height="6" fill="currentColor" opacity="0.6"/>
+<line x1="600" y1="142" x2="600" y2="154" stroke="currentColor" stroke-width="2"/>
+<rect x="572" y="154" width="56" height="34" rx="4" fill="#2f6fdf"/><text x="600" y="176" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">10 N</text>
+<text x="554" y="94" fill="#7d4fc4" font-size="13" text-anchor="end">carries 5 N</text>
+<text x="646" y="94" fill="#7d4fc4" font-size="13">5 N</text>
+<line x1="670" y1="124.0" x2="670" y2="136.0" stroke="#d9473a" stroke-width="2" marker-start="url(#cs-tick)" marker-end="url(#cs-tick)"/><text x="676" y="134.0" fill="#d9473a" font-size="13">1 cm</text>
+<text x="120" y="355" text-anchor="middle" fill="currentColor" font-size="14">k = 500 N/m</text>
+<text x="360" y="355" text-anchor="middle" fill="currentColor" font-size="14">acts like 250 N/m: softer</text>
+<text x="600" y="355" text-anchor="middle" fill="currentColor" font-size="14">acts like 1000 N/m: stiffer</text>
+<text x="12" y="118" fill="currentColor" font-size="11" opacity="0.6">rest length</text>
+</svg>
+<figcaption>End to end, every spring carries the whole load, so each stretches as much as the single spring did and
+the stretches add up: twice the stretch for the same load, a softer pair. Side by side, the springs share the load, so
+each stretches half as much: a stiffer pair. The purple numbers are the force in each spring; the red brackets measure
+the stretch from the dashed rest length.</figcaption>
+</figure>
 
 <table class="compare">
 <tr><th></th><th>End to end (series)</th><th>Side by side (parallel)</th></tr>
