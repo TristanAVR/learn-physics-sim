@@ -217,6 +217,21 @@ the stretch from the dashed rest length.</figcaption>
 second $F/k_2$, and the total stretch is $F\,(1/k_1 + 1/k_2)$. In parallel, both stretch the same $x$, so their forces
 $k_1 x$ and $k_2 x$ add to $(k_1 + k_2)\,x$.</p>
 
+<p>Try it with springs that are <i>not</i> equal. Before you touch the demo, predict: two springs of 500 N/m and
+250 N/m end to end, carrying 1 kg. Which one stretches more, and what single spring would behave like the pair? Then
+set it up and check. On the right hangs one spring with the stiffness the rules predict; if the rules are right, it
+always ends up stretched exactly as far as the pair.</p>
+
+<div class="demo" data-src="03-hookes-law/combine.js" data-height="460"
+     data-caption="Two springs end to end or side by side, next to one spring with the combined stiffness (green). Purple: force in each spring."></div>
+
+<details class="hint"><summary>Answer</summary>
+<p>Both carry the full 9.81 N. The softer one stretches more: $9.81/250 = 3.9$ cm against $9.81/500 = 2.0$ cm. The
+pair acts like $1/(1/500 + 1/250) = 167$ N/m and stretches $3.9 + 2.0 = 5.9$ cm in total, the same as one 167 N/m
+spring. Side by side, the stiffer spring carries more of the load, and the load has to hang closer to it for the bar
+to stay level.</p>
+</details>
+
 <h2>A mass on a spring: the bounce</h2>
 
 <p>Hang a mass on the spring, pull it down a little, and let go. It bounces up and down around the point where it
